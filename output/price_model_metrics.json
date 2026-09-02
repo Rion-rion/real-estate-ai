@@ -1,0 +1,47 @@
+{
+  "version": "3.0",
+  "model": "CatBoostRegressor",
+  "target": "log_contract_price_per_m2",
+  "features": [
+    "city",
+    "city_code",
+    "district_name",
+    "district_code",
+    "area_m2",
+    "floor_plan",
+    "build_year",
+    "building_age",
+    "structure",
+    "city_planning",
+    "transaction_year",
+    "transaction_quarter",
+    "market_year_index"
+  ],
+  "categorical_features": [
+    "city",
+    "city_code",
+    "district_name",
+    "district_code",
+    "floor_plan",
+    "structure",
+    "city_planning"
+  ],
+  "metrics": {
+    "validation": {
+      "mae": 11068236.174624296,
+      "rmse": 18088960.381264202,
+      "mape": 16.526974640500516,
+      "r2": 0.8673864630517705,
+      "price_per_m2_mae": 178429.83404504944,
+      "price_per_m2_mape": 16.526974640500516
+    },
+    "test": {
+      "mae": 16366006.777696393,
+      "rmse": 25287943.040296026,
+      "mape": 21.38189677383167,
+      "r2": 0.7560356582142596,
+      "price_per_m2_mae": 260659.67556404273,
+      "price_per_m2_mape": 21.381896773831667
+    }
+  }
+}

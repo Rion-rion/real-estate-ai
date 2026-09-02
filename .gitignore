@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+
+data/raw/
+data/processed/
+
+models/*.cbm
+
+output/price_test_predictions.csv
