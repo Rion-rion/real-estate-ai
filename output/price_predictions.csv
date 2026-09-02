@@ -1,0 +1,4 @@
+﻿property_id,city,district_name,area_m2,floor_plan,building_age,structure,renovation,use,city_planning,coverage_ratio,floor_area_ratio,transaction_year,transaction_quarter,asking_price,predicted_price_per_m2,predicted_contract_price,price_gap_amount,price_gap_ratio,price_gap_ratio_percent
+A001,足立区,千住,65.2,3LDK,12,RC,未改装,住宅,商業地域,80,400,2026,3,45000000,856766,55861147,-10861147,-0.19443114907755116,-19.44
+A002,世田谷区,三軒茶屋,55.0,2LDK,8,RC,改装済,住宅,近隣商業地域,80,300,2026,3,60000000,1065476,58601201,1398799,0.023869800893671102,2.39
+A003,港区,六本木,70.0,2LDK,5,RC,未改装,住宅,商業地域,80,600,2026,3,120000000,1886493,132054525,-12054525,-0.09128445238813286,-9.13

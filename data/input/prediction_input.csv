@@ -1,0 +1,4 @@
+﻿property_id,city,district_name,area_m2,floor_plan,building_age,structure,renovation,use,city_planning,coverage_ratio,floor_area_ratio,transaction_year,transaction_quarter,asking_price
+A001,足立区,千住,65.2,3LDK,12,RC,未改装,住宅,商業地域,80,400,2026,3,45000000
+A002,世田谷区,三軒茶屋,55.0,2LDK,8,RC,改装済,住宅,近隣商業地域,80,300,2026,3,60000000
+A003,港区,六本木,70.0,2LDK,5,RC,未改装,住宅,商業地域,80,600,2026,3,120000000
