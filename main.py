@@ -16,8 +16,10 @@ def run_script(script_name: str) -> None:
         )
 
     print()
+    print("=" * 60)
     print(f"{script_name} を実行します。")
-    print("-" * 60)
+    print("=" * 60)
+    print()
 
     result = subprocess.run(
         [
@@ -34,141 +36,127 @@ def run_script(script_name: str) -> None:
 
 
 def collect_price_data() -> None:
-    run_script(
-        "collect_mlit.py"
-    )
+    run_script("collect_mlit.py")
 
 
 def preprocess_price_data() -> None:
-    run_script(
-        "preprocessing.py"
-    )
+    run_script("preprocessing.py")
 
 
 def train_price_model() -> None:
-    run_script(
-        "train_price.py"
-    )
+    run_script("train_price.py")
 
 
 def predict_price_csv() -> None:
-    run_script(
-        "predict.py"
-    )
+    run_script("predict.py")
 
 
 def predict_price_excel() -> None:
-    run_script(
-        "predict_excel.py"
-    )
+    run_script("predict_excel.py")
+
+
+def create_analysis_report() -> None:
+    run_script("analysis_report.py")
 
 
 def create_days_template() -> None:
-    run_script(
-        "create_days_template.py"
-    )
+    run_script("create_days_template.py")
 
 
 def preprocess_days_data() -> None:
-    run_script(
-        "preprocessing_days.py"
-    )
+    run_script("preprocessing_days.py")
 
 
 def train_days_model() -> None:
-    run_script(
-        "train_days.py"
-    )
+    run_script("train_days.py")
 
 
 def build_price_model() -> None:
     print()
-    print(
-        "価格予測モデルの構築を開始します。"
-    )
+    print("価格予測モデルの一括構築を開始します。")
 
     collect_price_data()
     preprocess_price_data()
     train_price_model()
+    create_analysis_report()
 
     print()
-    print(
-        "価格予測モデルの構築が完了しました。"
-    )
+    print("価格予測モデルの構築が完了しました。")
 
 
 def build_days_model() -> None:
     print()
-    print(
-        "成約日数モデルの構築を開始します。"
-    )
+    print("成約日数モデルの一括構築を開始します。")
 
     preprocess_days_data()
     train_days_model()
 
     print()
-    print(
-        "成約日数モデルの構築が完了しました。"
-    )
+    print("成約日数モデルの構築が完了しました。")
+
+
+def build_all() -> None:
+    print()
+    print("不動産AIシステム全体の構築を開始します。")
+
+    build_price_model()
+
+    print()
+    print("価格AI構築完了")
+    print()
+
+    try:
+        build_days_model()
+
+    except RuntimeError as error:
+        print()
+        print("成約日数モデルは構築されませんでした。")
+        print(error)
+        print()
+        print(
+            "実成約データが100件以上集まり次第、"
+            "days-full を実行してください。"
+        )
+
+    print()
+    print("処理を終了しました。")
 
 
 def show_menu() -> None:
     print()
-    print(
-        "東京都中古マンション"
-        " AI予測システム"
-    )
+    print("=" * 60)
+    print("東京都中古マンション AI予測システム")
+    print("=" * 60)
 
     print()
-    print("利用可能なコマンド")
+    print("価格予測")
+    print("  collect           国交省APIからデータ取得")
+    print("  preprocess        価格データ前処理")
+    print("  train             価格モデル学習")
+    print("  predict           CSV価格予測")
+    print("  excel             Excel価格予測")
+    print("  report            価格モデル分析レポート")
+    print("  price-full        価格AIを一括構築")
+
     print()
-    print(
-        "collect"
-        "          国交省APIから価格データ取得"
-    )
-    print(
-        "preprocess"
-        "       価格学習データ前処理"
-    )
-    print(
-        "train"
-        "            価格モデル学習"
-    )
-    print(
-        "predict"
-        "          CSV価格予測"
-    )
-    print(
-        "excel"
-        "            Excel価格予測"
-    )
-    print(
-        "price-full"
-        "       価格モデル一括構築"
-    )
-    print(
-        "days-template"
-        "    成約履歴Excel作成"
-    )
-    print(
-        "days-preprocess"
-        "  成約日数学習データ作成"
-    )
-    print(
-        "days-train"
-        "       成約日数モデル学習"
-    )
-    print(
-        "days-full"
-        "        成約日数モデル一括構築"
-    )
+    print("成約日数予測")
+    print("  days-template     成約履歴Excel作成")
+    print("  days-preprocess   成約日数学習データ作成")
+    print("  days-train        成約日数モデル学習")
+    print("  days-full         成約日数AIを一括構築")
+
+    print()
+    print("全体")
+    print("  all               全システム構築")
+
+    print()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "東京都中古マンション"
-            "価格・成約日数予測システム"
+            "東京都中古マンション "
+            "成約価格・成約日数予測システム"
         )
     )
 
@@ -182,11 +170,13 @@ def main() -> None:
             "train",
             "predict",
             "excel",
+            "report",
             "price-full",
             "days-template",
             "days-preprocess",
             "days-train",
             "days-full",
+            "all",
         ],
     )
 
@@ -211,6 +201,9 @@ def main() -> None:
     elif args.command == "excel":
         predict_price_excel()
 
+    elif args.command == "report":
+        create_analysis_report()
+
     elif args.command == "price-full":
         build_price_model()
 
@@ -225,6 +218,9 @@ def main() -> None:
 
     elif args.command == "days-full":
         build_days_model()
+
+    elif args.command == "all":
+        build_all()
 
 
 if __name__ == "__main__":
