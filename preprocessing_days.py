@@ -1,7 +1,9 @@
 from pathlib import Path
+import json
 
 import numpy as np
 import pandas as pd
+from catboost import CatBoostRegressor
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -11,6 +13,18 @@ INPUT_FILE = (
     / "data"
     / "input"
     / "contract_history.xlsx"
+)
+
+PRICE_MODEL_FILE = (
+    PROJECT_ROOT
+    / "models"
+    / "price_model.cbm"
+)
+
+PRICE_METRICS_FILE = (
+    PROJECT_ROOT
+    / "output"
+    / "price_model_metrics.json"
 )
 
 PROCESSED_DIR = (
@@ -25,10 +39,10 @@ OUTPUT_FILE = (
 )
 
 
-def load_data() -> pd.DataFrame:
+def load_contract_data() -> pd.DataFrame:
     if not INPUT_FILE.exists():
         raise FileNotFoundError(
-            f"成約履歴Excelが見つかりません: {INPUT_FILE}"
+            f"成約履歴が見つかりません: {INPUT_FILE}"
         )
 
     df = pd.read_excel(
@@ -43,6 +57,47 @@ def load_data() -> pd.DataFrame:
     return df
 
 
+def load_price_model():
+    if not PRICE_MODEL_FILE.exists():
+        raise FileNotFoundError(
+            "価格予測モデルが見つかりません。"
+        )
+
+    if not PRICE_METRICS_FILE.exists():
+        raise FileNotFoundError(
+            "価格モデル情報が見つかりません。"
+        )
+
+    with open(
+        PRICE_METRICS_FILE,
+        "r",
+        encoding="utf-8",
+    ) as file:
+        model_info = json.load(file)
+
+    feature_columns = model_info.get(
+        "features",
+        []
+    )
+
+    categorical_columns = model_info.get(
+        "categorical_features",
+        []
+    )
+
+    model = CatBoostRegressor()
+
+    model.load_model(
+        str(PRICE_MODEL_FILE)
+    )
+
+    return (
+        model,
+        feature_columns,
+        categorical_columns,
+    )
+
+
 def validate_columns(
     df: pd.DataFrame,
 ) -> None:
@@ -51,24 +106,27 @@ def validate_columns(
         "listing_date",
         "contract_date",
         "asking_price",
-        "contract_price",
         "area_m2",
+        "city",
+        "district_name",
+        "floor_plan",
+        "building_age",
     ]
 
-    missing_columns = [
+    missing = [
         column
         for column in required_columns
         if column not in df.columns
     ]
 
-    if missing_columns:
+    if missing:
         raise KeyError(
-            "必要なカラムがありません: "
-            + ", ".join(missing_columns)
+            "不足カラム: "
+            + ", ".join(missing)
         )
 
 
-def clean_dates(
+def clean_data(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
 
@@ -84,13 +142,6 @@ def clean_dates(
         errors="coerce",
     )
 
-    return df
-
-
-def clean_numbers(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-
     numeric_columns = [
         "asking_price",
         "contract_price",
@@ -102,18 +153,17 @@ def clean_numbers(
 
     for column in numeric_columns:
 
-        if column not in df.columns:
-            continue
+        if column in df.columns:
 
-        df[column] = pd.to_numeric(
-            df[column],
-            errors="coerce",
-        )
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce",
+            )
 
     return df
 
 
-def create_features(
+def create_date_features(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
 
@@ -125,15 +175,18 @@ def create_features(
     ).dt.days
 
     df["listing_year"] = (
-        df["listing_date"].dt.year
+        df["listing_date"]
+        .dt.year
     )
 
     df["listing_month"] = (
-        df["listing_date"].dt.month
+        df["listing_date"]
+        .dt.month
     )
 
     df["listing_quarter"] = (
-        df["listing_date"].dt.quarter
+        df["listing_date"]
+        .dt.quarter
     )
 
     df["asking_price_per_m2"] = (
@@ -141,19 +194,102 @@ def create_features(
         / df["area_m2"]
     )
 
-    df["contract_price_per_m2"] = (
-        df["contract_price"]
-        / df["area_m2"]
+    return df
+
+
+def prepare_price_model_input(
+    df: pd.DataFrame,
+    feature_columns,
+    categorical_columns,
+) -> pd.DataFrame:
+
+    price_df = df.copy()
+
+    # 価格モデルでは transaction_year / quarter
+    # という名前で学習しているため、
+    # 売出時点の日付を使用する。
+    price_df["transaction_year"] = (
+        price_df["listing_year"]
+    )
+
+    price_df["transaction_quarter"] = (
+        price_df["listing_quarter"]
+    )
+
+    for column in feature_columns:
+
+        if column not in price_df.columns:
+            price_df[column] = np.nan
+
+        if column in categorical_columns:
+
+            price_df[column] = (
+                price_df[column]
+                .fillna("不明")
+                .astype(str)
+            )
+
+        else:
+
+            price_df[column] = pd.to_numeric(
+                price_df[column],
+                errors="coerce",
+            )
+
+    return price_df
+
+
+def create_price_ai_features(
+    df: pd.DataFrame,
+    model,
+    feature_columns,
+    categorical_columns,
+) -> pd.DataFrame:
+
+    df = df.copy()
+
+    price_input = prepare_price_model_input(
+        df,
+        feature_columns,
+        categorical_columns,
+    )
+
+    predicted_log_unit_price = (
+        model.predict(
+            price_input[
+                feature_columns
+            ]
+        )
+    )
+
+    predicted_unit_price = (
+        np.expm1(
+            predicted_log_unit_price
+        )
+    )
+
+    predicted_unit_price = np.maximum(
+        predicted_unit_price,
+        0,
+    )
+
+    df["ai_price_per_m2"] = (
+        predicted_unit_price
+    )
+
+    df["ai_estimated_price"] = (
+        df["ai_price_per_m2"]
+        * df["area_m2"]
     )
 
     df["price_gap_amount"] = (
         df["asking_price"]
-        - df["contract_price"]
+        - df["ai_estimated_price"]
     )
 
     df["price_gap_ratio"] = (
         df["price_gap_amount"]
-        / df["contract_price"]
+        / df["ai_estimated_price"]
     )
 
     return df
@@ -169,17 +305,16 @@ def remove_invalid_rows(
         df["listing_date"].notna()
         & df["contract_date"].notna()
         & df["asking_price"].notna()
-        & df["contract_price"].notna()
         & df["area_m2"].notna()
         & df["days_to_contract"].notna()
+        & df["ai_estimated_price"].notna()
     ].copy()
 
     df = df[
-        df["days_to_contract"] >= 0
-    ].copy()
-
-    df = df[
-        df["days_to_contract"] <= 1000
+        df["days_to_contract"].between(
+            1,
+            1000,
+        )
     ].copy()
 
     df = df[
@@ -187,18 +322,16 @@ def remove_invalid_rows(
     ].copy()
 
     df = df[
-        df["contract_price"] > 0
-    ].copy()
-
-    df = df[
         df["area_m2"] > 0
     ].copy()
 
-    removed = before - len(df)
+    df = df[
+        df["ai_estimated_price"] > 0
+    ].copy()
 
     print(
-        f"異常・欠損データ削除: "
-        f"{removed:,}件"
+        f"除外件数: "
+        f"{before - len(df):,}件"
     )
 
     return df
@@ -233,57 +366,28 @@ def select_columns(
         "asking_price",
         "asking_price_per_m2",
 
-        "contract_date",
-        "contract_price",
-        "contract_price_per_m2",
+        "ai_price_per_m2",
+        "ai_estimated_price",
 
         "price_gap_amount",
         "price_gap_ratio",
 
+        # 評価・確認用。学習特徴量には使わない
+        "contract_date",
+        "contract_price",
+
         "days_to_contract",
     ]
 
-    available_columns = [
+    available = [
         column
         for column in columns
         if column in df.columns
     ]
 
     return df[
-        available_columns
+        available
     ].copy()
-
-
-def show_summary(
-    df: pd.DataFrame,
-) -> None:
-
-    print()
-    print("成約日数データ 前処理完了")
-
-    print(
-        f"最終件数: {len(df):,}件"
-    )
-
-    print()
-    print("成約日数:")
-
-    print(
-        df["days_to_contract"]
-        .describe()
-        .round(1)
-    )
-
-    print()
-    print("欠損数:")
-
-    print(
-        df.isna()
-        .sum()
-        .sort_values(
-            ascending=False
-        )
-    )
 
 
 def save_data(
@@ -303,7 +407,11 @@ def save_data(
 
     print()
     print(
-        "days_training.csv を保存しました。"
+        "成約日数学習データ完成"
+    )
+
+    print(
+        f"件数: {len(df):,}件"
     )
 
     print(
@@ -311,30 +419,36 @@ def save_data(
     )
 
 
-def main() -> None:
+def main():
 
     print(
-        "中古マンション"
-        "成約日数学習データ前処理"
+        "成約日数学習データ作成 Ver.2"
     )
 
-    print()
-
-    df = load_data()
+    df = load_contract_data()
 
     validate_columns(df)
 
-    df = clean_dates(df)
+    df = clean_data(df)
 
-    df = clean_numbers(df)
+    df = create_date_features(df)
 
-    df = create_features(df)
+    (
+        price_model,
+        price_features,
+        price_categories,
+    ) = load_price_model()
+
+    df = create_price_ai_features(
+        df,
+        price_model,
+        price_features,
+        price_categories,
+    )
 
     df = remove_invalid_rows(df)
 
     df = select_columns(df)
-
-    show_summary(df)
 
     save_data(df)
 
