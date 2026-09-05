@@ -21,10 +21,20 @@ TRAINING_FILE = (
     / "price_training.csv"
 )
 
-MODELS_DIR = PROJECT_ROOT / "models"
-OUTPUT_DIR = PROJECT_ROOT / "output"
+MODELS_DIR = (
+    PROJECT_ROOT
+    / "models"
+)
 
-MODEL_FILE = MODELS_DIR / "price_model.cbm"
+OUTPUT_DIR = (
+    PROJECT_ROOT
+    / "output"
+)
+
+MODEL_FILE = (
+    MODELS_DIR
+    / "price_model.cbm"
+)
 
 METRICS_FILE = (
     OUTPUT_DIR
@@ -46,74 +56,55 @@ FEATURE_COMPARISON_FILE = (
     / "price_feature_set_comparison.csv"
 )
 
-TARGET_COLUMN = "contract_price_per_m2"
+FINAL_TEST_COMPARISON_FILE = (
+    OUTPUT_DIR
+    / "price_final_test_comparison.csv"
+)
+
+TARGET_COLUMN = (
+    "contract_price_per_m2"
+)
+
+VER4_REFERENCE_MAPE = 17.71
+VER4_REFERENCE_R2 = 0.8528
+
+
+BASELINE_FEATURES = [
+    "city",
+    "district_name",
+    "area_m2",
+    "floor_plan",
+    "building_age",
+    "structure",
+    "city_planning",
+    "transaction_year",
+    "transaction_quarter",
+]
 
 
 FEATURE_SETS = {
-    "code_compact": [
-        "city_code",
-        "district_code",
-        "area_m2",
-        "floor_plan",
-        "building_age",
-        "structure",
-        "renovation",
-        "use",
-        "city_planning",
-        "coverage_ratio",
-        "floor_area_ratio",
-        "transaction_year",
-        "transaction_quarter",
+    "baseline_current": [
+        *BASELINE_FEATURES,
     ],
 
-    "name_compact": [
-        "city",
-        "district_name",
-        "area_m2",
-        "floor_plan",
-        "building_age",
-        "structure",
-        "renovation",
-        "use",
-        "city_planning",
-        "coverage_ratio",
-        "floor_area_ratio",
-        "transaction_year",
-        "transaction_quarter",
+    "station_name": [
+        *BASELINE_FEATURES,
+        "station_name",
     ],
 
-    "mixed_compact": [
-        "city_code",
-        "district_name",
-        "area_m2",
-        "floor_plan",
-        "building_age",
-        "structure",
-        "renovation",
-        "use",
-        "city_planning",
-        "coverage_ratio",
-        "floor_area_ratio",
-        "transaction_year",
-        "transaction_quarter",
+    "station_geo": [
+        *BASELINE_FEATURES,
+        "station_name",
+        "station_latitude",
+        "station_longitude",
     ],
 
-    "mixed_extended": [
-        "city_code",
-        "district_name",
-        "area_m2",
-        "floor_plan",
-        "building_age",
-        "structure",
-        "renovation",
-        "use",
-        "city_planning",
-        "coverage_ratio",
-        "floor_area_ratio",
-        "total_floor_area",
-        "unit_area_ratio",
-        "transaction_year",
-        "transaction_quarter",
+    "station_geo_line": [
+        *BASELINE_FEATURES,
+        "station_name",
+        "station_line",
+        "station_latitude",
+        "station_longitude",
     ],
 }
 
@@ -125,16 +116,20 @@ ALL_CATEGORICAL_COLUMNS = {
     "district_code",
     "floor_plan",
     "structure",
-    "renovation",
-    "use",
     "city_planning",
+    "station_name",
+    "station_code",
+    "station_group_code",
+    "station_company",
+    "station_line",
 }
 
 
 def load_data() -> pd.DataFrame:
     if not TRAINING_FILE.exists():
         raise FileNotFoundError(
-            f"学習データが見つかりません: {TRAINING_FILE}"
+            f"学習データが見つかりません: "
+            f"{TRAINING_FILE}"
         )
 
     df = pd.read_csv(
@@ -158,7 +153,7 @@ def prepare_data(
 
     required_columns = [
         "contract_price",
-        "contract_price_per_m2",
+        TARGET_COLUMN,
         "area_m2",
         "transaction_year",
     ]
@@ -169,37 +164,35 @@ def prepare_data(
                 f"{column} が見つかりません。"
             )
 
-    df["contract_price"] = pd.to_numeric(
-        df["contract_price"],
-        errors="coerce",
-    )
+    numeric_columns = [
+        "contract_price",
+        TARGET_COLUMN,
+        "area_m2",
+        "building_age",
+        "station_latitude",
+        "station_longitude",
+        "transaction_year",
+        "transaction_quarter",
+    ]
 
-    df["contract_price_per_m2"] = (
-        pd.to_numeric(
-            df["contract_price_per_m2"],
+    for column in numeric_columns:
+        if column not in df.columns:
+            continue
+
+        df[column] = pd.to_numeric(
+            df[column],
             errors="coerce",
         )
-    )
-
-    df["area_m2"] = pd.to_numeric(
-        df["area_m2"],
-        errors="coerce",
-    )
-
-    df["transaction_year"] = pd.to_numeric(
-        df["transaction_year"],
-        errors="coerce",
-    )
 
     for column in df.columns:
+        if column not in ALL_CATEGORICAL_COLUMNS:
+            continue
 
-        if column in ALL_CATEGORICAL_COLUMNS:
-
-            df[column] = (
-                df[column]
-                .fillna("不明")
-                .astype(str)
-            )
+        df[column] = (
+            df[column]
+            .fillna("不明")
+            .astype(str)
+        )
 
     df = df[
         df["contract_price"].notna()
@@ -213,6 +206,11 @@ def prepare_data(
         & (df[TARGET_COLUMN] > 0)
         & (df["area_m2"] > 0)
     ].copy()
+
+    print(
+        f"学習利用可能件数: "
+        f"{len(df):,}件"
+    )
 
     return df
 
@@ -239,20 +237,28 @@ def split_data(
         or len(test_df) == 0
     ):
         raise RuntimeError(
-            "2024年以前 / 2025年 / 2026年"
-            "の分割ができません。"
+            "2024年以前 / 2025年 / "
+            "2026年の時系列分割ができません。"
         )
 
     print()
-    print("時間順データ分割")
     print(
-        f"学習: {len(train_df):,}件"
+        "時間順データ分割"
     )
+
     print(
-        f"検証: {len(validation_df):,}件"
+        f"学習 2021-2024: "
+        f"{len(train_df):,}件"
     )
+
     print(
-        f"最終テスト: {len(test_df):,}件"
+        f"検証 2025: "
+        f"{len(validation_df):,}件"
+    )
+
+    print(
+        f"最終テスト 2026: "
+        f"{len(test_df):,}件"
     )
 
     return (
@@ -260,6 +266,45 @@ def split_data(
         validation_df,
         test_df,
     )
+
+
+def validate_feature_sets(
+    df: pd.DataFrame,
+) -> None:
+
+    print()
+    print(
+        "Ver.5 特徴量セット"
+    )
+
+    for (
+        name,
+        feature_set,
+    ) in FEATURE_SETS.items():
+
+        available = [
+            column
+            for column in feature_set
+            if column in df.columns
+        ]
+
+        missing = [
+            column
+            for column in feature_set
+            if column not in df.columns
+        ]
+
+        print()
+        print(
+            f"[{name}] "
+            f"{len(available)}特徴量"
+        )
+
+        if missing:
+            print(
+                "使用不可: "
+                + ", ".join(missing)
+            )
 
 
 def get_available_features(
@@ -328,7 +373,14 @@ def calculate_mape(
         dtype=float,
     )
 
-    valid = actual != 0
+    valid = (
+        np.isfinite(actual)
+        & np.isfinite(predicted)
+        & (actual != 0)
+    )
+
+    if not valid.any():
+        return np.nan
 
     return float(
         np.mean(
@@ -348,11 +400,16 @@ def create_time_weights(
     df: pd.DataFrame,
 ):
 
-    year = df[
-        "transaction_year"
-    ].astype(float)
+    year = (
+        df[
+            "transaction_year"
+        ]
+        .astype(float)
+    )
 
-    minimum_year = year.min()
+    minimum_year = (
+        year.min()
+    )
 
     weights = (
         1.0
@@ -363,7 +420,30 @@ def create_time_weights(
         * 0.15
     )
 
-    return weights.to_numpy()
+    return (
+        weights.to_numpy()
+    )
+
+
+def create_model(
+    iterations: int,
+    verbose=False,
+):
+
+    return CatBoostRegressor(
+        iterations=iterations,
+        learning_rate=0.03,
+        depth=9,
+        loss_function="RMSE",
+        eval_metric="RMSE",
+        random_seed=42,
+        l2_leaf_reg=8,
+        random_strength=0.4,
+        bagging_temperature=0.5,
+        verbose=verbose,
+        allow_writing_files=False,
+        thread_count=-1,
+    )
 
 
 def train_candidate(
@@ -373,59 +453,58 @@ def train_candidate(
     categorical_columns,
 ):
 
-    train_df = prepare_features(
+    train_work = prepare_features(
         train_df,
         feature_columns,
         categorical_columns,
     )
 
-    validation_df = prepare_features(
+    validation_work = prepare_features(
         validation_df,
         feature_columns,
         categorical_columns,
     )
 
-    X_train = train_df[
+    X_train = train_work[
         feature_columns
     ]
 
-    X_validation = validation_df[
+    X_validation = validation_work[
         feature_columns
     ]
 
     y_train = np.log1p(
-        train_df[TARGET_COLUMN]
+        train_work[
+            TARGET_COLUMN
+        ]
     )
 
     y_validation = np.log1p(
-        validation_df[TARGET_COLUMN]
+        validation_work[
+            TARGET_COLUMN
+        ]
     )
 
     sample_weights = (
         create_time_weights(
-            train_df
+            train_work
         )
     )
 
-    model = CatBoostRegressor(
+    model = create_model(
         iterations=3000,
-        learning_rate=0.03,
-        depth=9,
-        loss_function="RMSE",
-        eval_metric="RMSE",
-        random_seed=42,
-        l2_leaf_reg=8,
-        random_strength=0.4,
-        bagging_temperature=0.5,
         verbose=False,
-        allow_writing_files=False,
     )
 
     model.fit(
         X_train,
         y_train,
-        cat_features=categorical_columns,
-        sample_weight=sample_weights,
+        cat_features=(
+            categorical_columns
+        ),
+        sample_weight=(
+            sample_weights
+        ),
         eval_set=(
             X_validation,
             y_validation,
@@ -444,7 +523,7 @@ def predict_prices(
     categorical_columns,
 ):
 
-    df = prepare_features(
+    work = prepare_features(
         df,
         feature_columns,
         categorical_columns,
@@ -452,7 +531,9 @@ def predict_prices(
 
     predicted_log_unit_price = (
         model.predict(
-            df[feature_columns]
+            work[
+                feature_columns
+            ]
         )
     )
 
@@ -462,14 +543,18 @@ def predict_prices(
         )
     )
 
-    predicted_unit_price = np.maximum(
-        predicted_unit_price,
-        0,
+    predicted_unit_price = (
+        np.maximum(
+            predicted_unit_price,
+            0,
+        )
     )
 
     predicted_price = (
         predicted_unit_price
-        * df["area_m2"].to_numpy()
+        * work[
+            "area_m2"
+        ].to_numpy()
     )
 
     return (
@@ -496,12 +581,16 @@ def evaluate(
     )
 
     actual_price = (
-        df["contract_price"]
+        df[
+            "contract_price"
+        ]
         .to_numpy()
     )
 
     actual_unit_price = (
-        df[TARGET_COLUMN]
+        df[
+            TARGET_COLUMN
+        ]
         .to_numpy()
     )
 
@@ -527,9 +616,11 @@ def evaluate(
         predicted_price,
     )
 
-    unit_mae = mean_absolute_error(
-        actual_unit_price,
-        predicted_unit_price,
+    unit_mae = (
+        mean_absolute_error(
+            actual_unit_price,
+            predicted_unit_price,
+        )
     )
 
     unit_mape = calculate_mape(
@@ -563,12 +654,11 @@ def compare_feature_sets(
 ):
 
     results = []
-
     models = {}
 
     print()
     print(
-        "特徴量セット比較開始"
+        "Ver.5 特徴量セット比較開始"
     )
 
     for (
@@ -584,6 +674,9 @@ def compare_feature_sets(
             feature_set,
         )
 
+        if not feature_columns:
+            continue
+
         print()
         print(
             f"[{name}]"
@@ -592,6 +685,13 @@ def compare_feature_sets(
         print(
             f"特徴量数: "
             f"{len(feature_columns)}"
+        )
+
+        print(
+            "特徴量: "
+            + ", ".join(
+                feature_columns
+            )
         )
 
         model = train_candidate(
@@ -622,19 +722,21 @@ def compare_feature_sets(
                 - 1
             )
 
+        best_iteration += 1
+
         print(
-            f"MAPE: "
+            f"Validation MAPE: "
             f"{metrics['mape']:.2f}%"
         )
 
         print(
-            f"R²: "
+            f"Validation R²: "
             f"{metrics['r2']:.4f}"
         )
 
         print(
             f"Best iteration: "
-            f"{best_iteration + 1}"
+            f"{best_iteration}"
         )
 
         results.append(
@@ -642,6 +744,10 @@ def compare_feature_sets(
                 "feature_set": name,
                 "feature_count": (
                     len(feature_columns)
+                ),
+                "uses_station": (
+                    "station_name"
+                    in feature_columns
                 ),
                 "validation_mae": (
                     metrics["mae"]
@@ -656,19 +762,21 @@ def compare_feature_sets(
                     metrics["r2"]
                 ),
                 "best_iteration": (
-                    best_iteration + 1
+                    best_iteration
                 ),
             }
         )
 
         models[name] = {
             "model": model,
-            "features": feature_columns,
+            "features": (
+                feature_columns
+            ),
             "categorical": (
                 categorical_columns
             ),
             "best_iteration": (
-                best_iteration + 1
+                best_iteration
             ),
         }
 
@@ -686,39 +794,46 @@ def compare_feature_sets(
         )
     )
 
-    best_name = comparison.iloc[
-        0
-    ][
-        "feature_set"
-    ]
+    best_name = (
+        comparison.iloc[0][
+            "feature_set"
+        ]
+    )
 
     print()
     print(
-        "特徴量比較結果"
+        "2025年 検証結果"
     )
 
     print(
         comparison[
             [
                 "feature_set",
+                "feature_count",
                 "validation_mape",
                 "validation_r2",
                 "best_iteration",
             ]
-        ].to_string(
+        ]
+        .to_string(
             index=False
         )
     )
 
     print()
     print(
-        f"採用特徴量セット: "
+        "2025年の検証結果のみで"
+        "モデルを選択します。"
+    )
+
+    print(
+        f"採用候補: "
         f"{best_name}"
     )
 
     return (
         best_name,
-        models[best_name],
+        models,
         comparison,
     )
 
@@ -728,29 +843,28 @@ def train_final_model(
     feature_columns,
     categorical_columns,
     iterations,
+    model_name,
 ):
 
-    train_validation_df = (
-        prepare_features(
-            train_validation_df,
-            feature_columns,
-            categorical_columns,
-        )
+    work = prepare_features(
+        train_validation_df,
+        feature_columns,
+        categorical_columns,
     )
 
-    X = train_validation_df[
+    X = work[
         feature_columns
     ]
 
     y = np.log1p(
-        train_validation_df[
+        work[
             TARGET_COLUMN
         ]
     )
 
     sample_weights = (
         create_time_weights(
-            train_validation_df
+            work
         )
     )
 
@@ -759,33 +873,206 @@ def train_final_model(
         300,
     )
 
-    model = CatBoostRegressor(
-        iterations=final_iterations,
-        learning_rate=0.03,
-        depth=9,
-        loss_function="RMSE",
-        random_seed=42,
-        l2_leaf_reg=8,
-        random_strength=0.4,
-        bagging_temperature=0.5,
+    model = create_model(
+        iterations=(
+            final_iterations
+        ),
         verbose=100,
-        allow_writing_files=False,
     )
 
     print()
+    print(
+        f"[{model_name}]"
+    )
+
     print(
         "2021～2025年で"
         "最終モデルを再学習します。"
     )
 
+    print(
+        f"Iterations: "
+        f"{final_iterations}"
+    )
+
     model.fit(
         X,
         y,
-        cat_features=categorical_columns,
-        sample_weight=sample_weights,
+        cat_features=(
+            categorical_columns
+        ),
+        sample_weight=(
+            sample_weights
+        ),
     )
 
     return model
+
+
+def run_final_test(
+    train_validation_df,
+    test_df,
+    name,
+    candidate_data,
+):
+
+    model = train_final_model(
+        train_validation_df,
+        candidate_data[
+            "features"
+        ],
+        candidate_data[
+            "categorical"
+        ],
+        candidate_data[
+            "best_iteration"
+        ],
+        name,
+    )
+
+    (
+        metrics,
+        predicted_unit_price,
+        predicted_price,
+    ) = evaluate(
+        model,
+        test_df,
+        candidate_data[
+            "features"
+        ],
+        candidate_data[
+            "categorical"
+        ],
+    )
+
+    return (
+        model,
+        metrics,
+        predicted_unit_price,
+        predicted_price,
+    )
+
+
+def compare_final_test(
+    train_validation_df,
+    test_df,
+    selected_name,
+    models,
+):
+
+    comparison_names = [
+        "baseline_current",
+    ]
+
+    if (
+        selected_name
+        not in comparison_names
+    ):
+        comparison_names.append(
+            selected_name
+        )
+
+    results = {}
+    rows = []
+
+    print()
+    print(
+        "2026年 最終テスト"
+    )
+
+    print(
+        "※ここではモデル選択をしません。"
+    )
+
+    print(
+        "2025年検証で選んだモデルを"
+        "未使用の2026年データで評価します。"
+    )
+
+    for name in comparison_names:
+
+        candidate_data = (
+            models[name]
+        )
+
+        (
+            model,
+            metrics,
+            predicted_unit_price,
+            predicted_price,
+        ) = run_final_test(
+            train_validation_df,
+            test_df,
+            name,
+            candidate_data,
+        )
+
+        rows.append(
+            {
+                "feature_set": name,
+                "is_selected": (
+                    name
+                    == selected_name
+                ),
+                "test_mae": (
+                    metrics["mae"]
+                ),
+                "test_rmse": (
+                    metrics["rmse"]
+                ),
+                "test_mape": (
+                    metrics["mape"]
+                ),
+                "test_r2": (
+                    metrics["r2"]
+                ),
+                "price_per_m2_mae": (
+                    metrics[
+                        "price_per_m2_mae"
+                    ]
+                ),
+                "price_per_m2_mape": (
+                    metrics[
+                        "price_per_m2_mape"
+                    ]
+                ),
+            }
+        )
+
+        results[name] = {
+            "model": model,
+            "metrics": metrics,
+            "predicted_unit_price": (
+                predicted_unit_price
+            ),
+            "predicted_price": (
+                predicted_price
+            ),
+        }
+
+    comparison = pd.DataFrame(
+        rows
+    )
+
+    print()
+    print(
+        comparison[
+            [
+                "feature_set",
+                "test_mape",
+                "test_r2",
+                "test_mae",
+            ]
+        ]
+        .to_string(
+            index=False
+        )
+    )
+
+    return (
+        results,
+        comparison,
+    )
 
 
 def save_predictions(
@@ -883,12 +1170,13 @@ def save_feature_importance(
 
 
 def save_results(
-    model,
+    final_model,
     selected_name,
-    feature_columns,
-    categorical_columns,
+    selected_data,
     validation_comparison,
+    final_test_comparison,
     test_metrics,
+    baseline_metrics,
 ):
 
     MODELS_DIR.mkdir(
@@ -901,7 +1189,7 @@ def save_results(
         exist_ok=True,
     )
 
-    model.save_model(
+    final_model.save_model(
         MODEL_FILE
     )
 
@@ -911,11 +1199,35 @@ def save_results(
         encoding="utf-8-sig",
     )
 
+    final_test_comparison.to_csv(
+        FINAL_TEST_COMPARISON_FILE,
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    station_features = [
+        feature
+        for feature in selected_data[
+            "features"
+        ]
+        if feature.startswith(
+            "station_"
+        )
+    ]
+
     result = {
-        "version": "4.0",
-        "model": "CatBoostRegressor",
+        "version": "5.0",
+        "model": (
+            "CatBoostRegressor"
+        ),
+        "data_source": (
+            "MLIT XPT001 + XKT015"
+        ),
         "selected_feature_set": (
             selected_name
+        ),
+        "selection_rule": (
+            "Lowest 2025 validation MAPE"
         ),
         "target": (
             "log_contract_price_per_m2"
@@ -927,14 +1239,37 @@ def save_results(
             "2026"
         ),
         "features": (
-            feature_columns
+            selected_data[
+                "features"
+            ]
         ),
         "categorical_features": (
-            categorical_columns
+            selected_data[
+                "categorical"
+            ]
+        ),
+        "station_features": (
+            station_features
         ),
         "test_metrics": (
             test_metrics
         ),
+        "baseline_same_dataset_metrics": (
+            baseline_metrics
+        ),
+        "ver4_reference": {
+            "mape": (
+                VER4_REFERENCE_MAPE
+            ),
+            "r2": (
+                VER4_REFERENCE_R2
+            ),
+            "note": (
+                "Reference only. "
+                "Ver.4 used a different "
+                "data extraction pipeline."
+            ),
+        },
     }
 
     with open(
@@ -951,16 +1286,123 @@ def save_results(
         )
 
 
+def show_final_result(
+    selected_name,
+    selected_metrics,
+    baseline_metrics,
+):
+
+    print()
+    print(
+        "Ver.5 最終結果"
+    )
+
+    print()
+    print(
+        f"採用モデル: "
+        f"{selected_name}"
+    )
+
+    print(
+        f"MAE : "
+        f"{selected_metrics['mae']:,.0f}円"
+    )
+
+    print(
+        f"RMSE: "
+        f"{selected_metrics['rmse']:,.0f}円"
+    )
+
+    print(
+        f"MAPE: "
+        f"{selected_metrics['mape']:.2f}%"
+    )
+
+    print(
+        f"R²  : "
+        f"{selected_metrics['r2']:.4f}"
+    )
+
+    print()
+    print(
+        "同一データの駅なしベースライン"
+    )
+
+    print(
+        f"MAPE: "
+        f"{baseline_metrics['mape']:.2f}%"
+    )
+
+    print(
+        f"R²  : "
+        f"{baseline_metrics['r2']:.4f}"
+    )
+
+    mape_difference = (
+        baseline_metrics["mape"]
+        - selected_metrics["mape"]
+    )
+
+    r2_difference = (
+        selected_metrics["r2"]
+        - baseline_metrics["r2"]
+    )
+
+    print()
+    print(
+        "駅特徴量の効果"
+    )
+
+    print(
+        f"MAPE改善: "
+        f"{mape_difference:+.2f}"
+        "ポイント"
+    )
+
+    print(
+        f"R²改善: "
+        f"{r2_difference:+.4f}"
+    )
+
+    print()
+    print(
+        "旧Ver.4参考値"
+    )
+
+    print(
+        f"MAPE: "
+        f"{VER4_REFERENCE_MAPE:.2f}%"
+    )
+
+    print(
+        f"R²  : "
+        f"{VER4_REFERENCE_R2:.4f}"
+    )
+
+    print(
+        "※Ver.4とは取得データ構成が違うため、"
+        "参考比較です。"
+    )
+
+
 def main():
 
     print(
-        "東京都中古マンション"
-        "価格予測モデル Ver.4"
+        "東京都中古マンション "
+        "価格予測モデル Ver.5"
+    )
+
+    print(
+        "駅特徴量追加版"
     )
 
     df = load_data()
 
     df = prepare_data(
+        df
+    )
+
+    validate_feature_sets(
         df
     )
 
@@ -974,28 +1416,16 @@ def main():
 
     (
         selected_name,
-        selected_data,
-        comparison,
+        models,
+        validation_comparison,
     ) = compare_feature_sets(
         train_df,
         validation_df,
     )
 
-    feature_columns = (
-        selected_data[
-            "features"
-        ]
-    )
-
-    categorical_columns = (
-        selected_data[
-            "categorical"
-        ]
-    )
-
-    best_iteration = (
-        selected_data[
-            "best_iteration"
+    selected_data = (
+        models[
+            selected_name
         ]
     )
 
@@ -1009,59 +1439,44 @@ def main():
         )
     )
 
-    final_model = train_final_model(
-        train_validation_df,
-        feature_columns,
-        categorical_columns,
-        best_iteration,
-    )
-
     (
-        test_metrics,
-        predicted_unit_price,
-        predicted_price,
-    ) = evaluate(
-        final_model,
+        test_results,
+        final_test_comparison,
+    ) = compare_final_test(
+        train_validation_df,
         test_df,
-        feature_columns,
-        categorical_columns,
+        selected_name,
+        models,
     )
 
-    print()
-    print(
-        "最終テストデータ 精度"
+    selected_result = (
+        test_results[
+            selected_name
+        ]
     )
 
-    print(
-        f"MAE : "
-        f"{test_metrics['mae']:,.0f}円"
+    baseline_result = (
+        test_results[
+            "baseline_current"
+        ]
     )
 
-    print(
-        f"RMSE: "
-        f"{test_metrics['rmse']:,.0f}円"
+    final_model = (
+        selected_result[
+            "model"
+        ]
     )
 
-    print(
-        f"MAPE: "
-        f"{test_metrics['mape']:.2f}%"
+    test_metrics = (
+        selected_result[
+            "metrics"
+        ]
     )
 
-    print(
-        f"R²  : "
-        f"{test_metrics['r2']:.4f}"
-    )
-
-    print()
-    print(
-        f"㎡単価MAE : "
-        f"{test_metrics['price_per_m2_mae']:,.0f}"
-        f"円/㎡"
-    )
-
-    print(
-        f"㎡単価MAPE: "
-        f"{test_metrics['price_per_m2_mape']:.2f}%"
+    baseline_metrics = (
+        baseline_result[
+            "metrics"
+        ]
     )
 
     OUTPUT_DIR.mkdir(
@@ -1071,45 +1486,60 @@ def main():
 
     save_predictions(
         test_df,
-        predicted_unit_price,
-        predicted_price,
+        selected_result[
+            "predicted_unit_price"
+        ],
+        selected_result[
+            "predicted_price"
+        ],
     )
 
     save_feature_importance(
         final_model,
-        feature_columns,
+        selected_data[
+            "features"
+        ],
     )
 
     save_results(
         final_model,
         selected_name,
-        feature_columns,
-        categorical_columns,
-        comparison,
+        selected_data,
+        validation_comparison,
+        final_test_comparison,
         test_metrics,
+        baseline_metrics,
+    )
+
+    show_final_result(
+        selected_name,
+        test_metrics,
+        baseline_metrics,
     )
 
     print()
     print(
-        "Ver.4 完了"
+        "Ver.5 完了"
     )
 
     print(
-        f"採用セット: "
-        f"{selected_name}"
+        f"モデル: "
+        f"{MODEL_FILE}"
     )
 
     print(
-        f"モデル: {MODEL_FILE}"
+        f"精度: "
+        f"{METRICS_FILE}"
     )
 
     print(
-        f"精度: {METRICS_FILE}"
-    )
-
-    print(
-        f"特徴量比較: "
+        f"検証比較: "
         f"{FEATURE_COMPARISON_FILE}"
+    )
+
+    print(
+        f"最終テスト比較: "
+        f"{FINAL_TEST_COMPARISON_FILE}"
     )
 
     print(
@@ -1118,7 +1548,7 @@ def main():
     )
 
     print(
-        f"予測結果: "
+        f"テスト予測: "
         f"{PREDICTIONS_FILE}"
     )
 

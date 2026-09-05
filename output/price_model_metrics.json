@@ -1,7 +1,9 @@
 {
-  "version": "4.0",
+  "version": "5.0",
   "model": "CatBoostRegressor",
-  "selected_feature_set": "name_compact",
+  "data_source": "MLIT XPT001 + XKT015",
+  "selected_feature_set": "station_geo_line",
+  "selection_rule": "Lowest 2025 validation MAPE",
   "target": "log_contract_price_per_m2",
   "final_training_period": "2021-2025",
   "final_test_period": "2026",
@@ -14,21 +16,46 @@
     "structure",
     "city_planning",
     "transaction_year",
-    "transaction_quarter"
+    "transaction_quarter",
+    "station_name",
+    "station_line",
+    "station_latitude",
+    "station_longitude"
   ],
   "categorical_features": [
     "city",
     "district_name",
     "floor_plan",
     "structure",
-    "city_planning"
+    "city_planning",
+    "station_name",
+    "station_line"
+  ],
+  "station_features": [
+    "station_name",
+    "station_line",
+    "station_latitude",
+    "station_longitude"
   ],
   "test_metrics": {
-    "mae": 12485824.969787491,
-    "rmse": 19641774.932976484,
-    "mape": 17.707038262677983,
-    "r2": 0.8528159309501149,
-    "price_per_m2_mae": 201196.37275458893,
-    "price_per_m2_mape": 17.70703826267798
+    "mae": 12168235.051371789,
+    "rmse": 19017664.94306778,
+    "mape": 17.26282128186162,
+    "r2": 0.865488246479925,
+    "price_per_m2_mae": 195798.31043621144,
+    "price_per_m2_mape": 17.26282128186162
+  },
+  "baseline_same_dataset_metrics": {
+    "mae": 12535969.340451056,
+    "rmse": 19769107.323360562,
+    "mape": 17.760630252685804,
+    "r2": 0.854648348964061,
+    "price_per_m2_mae": 201744.48389851762,
+    "price_per_m2_mape": 17.760630252685804
+  },
+  "ver4_reference": {
+    "mape": 17.71,
+    "r2": 0.8528,
+    "note": "Reference only. Ver.4 used a different data extraction pipeline."
   }
 }
