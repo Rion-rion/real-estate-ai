@@ -866,6 +866,97 @@ python main.py all
 
 ---
 
+# 🐳 Docker
+
+Dockerを利用して、ローカルのPython環境に依存せず実行できます。
+
+## イメージ作成
+
+プロジェクト直下で実行します。
+
+```bash
+docker build -t real-estate-ai .
+```
+
+## 起動確認
+
+```bash
+docker run --rm real-estate-ai
+```
+
+`main.py` のコマンド一覧が表示されれば正常です。
+
+## システム状態確認
+
+学習データ・モデル・出力ディレクトリをホスト側からマウントして実行します。
+
+Windows PowerShell：
+
+```powershell
+docker run --rm `
+  -v "${PWD}/data:/app/data" `
+  -v "${PWD}/models:/app/models" `
+  -v "${PWD}/output:/app/output" `
+  real-estate-ai status
+```
+
+## CSV価格予測
+
+```powershell
+docker run --rm `
+  -v "${PWD}/data:/app/data" `
+  -v "${PWD}/models:/app/models" `
+  -v "${PWD}/output:/app/output" `
+  real-estate-ai predict
+```
+
+予測結果はホスト側の以下に保存されます。
+
+```text
+output/price_predictions.csv
+```
+
+## Excel価格予測
+
+```powershell
+docker run --rm `
+  -v "${PWD}/data:/app/data" `
+  -v "${PWD}/models:/app/models" `
+  -v "${PWD}/output:/app/output" `
+  real-estate-ai excel
+```
+
+出力：
+
+```text
+output/price_predictions.xlsx
+```
+
+## 国交省APIを使用する場合
+
+APIキーを保存した `.env` をコンテナへ渡します。
+
+```powershell
+docker run --rm `
+  --env-file .env `
+  -v "${PWD}/data:/app/data" `
+  -v "${PWD}/models:/app/models" `
+  -v "${PWD}/output:/app/output" `
+  real-estate-ai station
+```
+
+`.env` はDockerイメージおよびGitHubには含めません。
+
+## Dockerで確認済みの処理
+
+- Dockerイメージのビルド
+- `main.py` の起動
+- 学習済みCatBoostモデルの読み込み
+- 駅参照データ612駅の読み込み
+- 路線・緯度・経度の自動補完
+- Ver.5 CSV価格予測
+- ホスト側への予測結果出力
+
 # 🔐 セキュリティ
 
 APIキーはソースコードへ直接記述せず、
