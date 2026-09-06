@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import numpy as np
 import pandas as pd
@@ -10,21 +11,28 @@ from matplotlib.ticker import FuncFormatter
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-PREDICTIONS_FILE = (
+OUTPUT_DIR = (
     PROJECT_ROOT
     / "output"
+)
+
+PREDICTIONS_FILE = (
+    OUTPUT_DIR
     / "price_test_predictions.csv"
 )
 
 FEATURE_IMPORTANCE_FILE = (
-    PROJECT_ROOT
-    / "output"
+    OUTPUT_DIR
     / "price_feature_importance.csv"
 )
 
+METRICS_FILE = (
+    OUTPUT_DIR
+    / "price_model_metrics.json"
+)
+
 REPORT_DIR = (
-    PROJECT_ROOT
-    / "output"
+    OUTPUT_DIR
     / "analysis"
 )
 
@@ -43,31 +51,59 @@ PRICE_BAND_METRICS_FILE = (
     / "price_band_metrics.csv"
 )
 
+STATION_METRICS_FILE = (
+    REPORT_DIR
+    / "station_metrics.csv"
+)
+
+MODEL_COMPARISON_FILE = (
+    REPORT_DIR
+    / "model_comparison.csv"
+)
+
 
 FEATURE_NAME_JP = {
     "city": "市区町村",
     "city_code": "市区町村コード",
     "district_name": "地区名",
     "district_code": "地区コード",
+
+    "station_name": "最寄駅",
+    "station_code": "駅コード",
+    "station_group_code": "駅グループコード",
+    "station_company": "鉄道事業者",
+    "station_line": "路線",
+    "station_latitude": "最寄駅緯度",
+    "station_longitude": "最寄駅経度",
+    "station_geometry_match_m": "駅GISマッチ距離",
+
     "area_m2": "専有面積",
     "floor_plan": "間取り",
+
     "build_year": "建築年",
     "building_age": "築年数",
+
     "structure": "建物構造",
+
     "renovation": "改装状況",
     "use": "用途",
+
     "city_planning": "都市計画",
+
     "coverage_ratio": "建ぺい率",
     "floor_area_ratio": "容積率",
+
     "transaction_year": "取引年",
     "transaction_quarter": "取引四半期",
+
     "market_year_index": "市場年指数",
+
     "total_floor_area": "延床面積",
     "unit_area_ratio": "専有面積比率",
 }
 
 
-def setup_japanese_font() -> None:
+def setup_japanese_font():
     preferred_fonts = [
         "Yu Gothic",
         "Yu Gothic UI",
@@ -78,13 +114,12 @@ def setup_japanese_font() -> None:
 
     installed_fonts = {
         font.name
-        for font in font_manager.fontManager.ttflist
+        for font
+        in font_manager.fontManager.ttflist
     }
 
     for font_name in preferred_fonts:
-
         if font_name in installed_fonts:
-
             plt.rcParams[
                 "font.family"
             ] = font_name
@@ -110,11 +145,31 @@ def yen_to_man_yen(
     )
 
 
-def load_predictions() -> pd.DataFrame:
-    if not PREDICTIONS_FILE.exists():
+def load_model_metrics():
+    if not METRICS_FILE.exists():
+        print(
+            "price_model_metrics.json "
+            "が見つからないため、"
+            "モデル比較をスキップします。"
+        )
 
+        return {}
+
+    with open(
+        METRICS_FILE,
+        "r",
+        encoding="utf-8",
+    ) as file:
+        return json.load(
+            file
+        )
+
+
+def load_predictions():
+    if not PREDICTIONS_FILE.exists():
         raise FileNotFoundError(
-            "テスト予測結果が見つかりません。\n"
+            "テスト予測結果が"
+            "見つかりません。\n"
             f"{PREDICTIONS_FILE}"
         )
 
@@ -130,12 +185,13 @@ def load_predictions() -> pd.DataFrame:
 
     missing_columns = [
         column
-        for column in required_columns
-        if column not in df.columns
+        for column
+        in required_columns
+        if column
+        not in df.columns
     ]
 
     if missing_columns:
-
         raise KeyError(
             "必要なカラムがありません: "
             + ", ".join(
@@ -162,15 +218,24 @@ def load_predictions() -> pd.DataFrame:
     )
 
     df = df[
-        df["contract_price"].notna()
-        & df[
+        df[
+            "contract_price"
+        ].notna()
+        &
+        df[
             "predicted_contract_price"
         ].notna()
     ].copy()
 
     df = df[
-        (df["contract_price"] > 0)
-        & (
+        (
+            df[
+                "contract_price"
+            ]
+            > 0
+        )
+        &
+        (
             df[
                 "predicted_contract_price"
             ]
@@ -184,7 +249,8 @@ def load_predictions() -> pd.DataFrame:
         df[
             "predicted_contract_price"
         ]
-        - df[
+        -
+        df[
             "contract_price"
         ]
     )
@@ -204,7 +270,21 @@ def load_predictions() -> pd.DataFrame:
         df[
             "absolute_error"
         ]
-        / df[
+        /
+        df[
+            "contract_price"
+        ]
+        * 100
+    )
+
+    df[
+        "signed_percentage_error"
+    ] = (
+        df[
+            "prediction_error"
+        ]
+        /
+        df[
             "contract_price"
         ]
         * 100
@@ -219,9 +299,8 @@ def load_predictions() -> pd.DataFrame:
 
 
 def calculate_basic_metrics(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-
+    df,
+):
     actual = (
         df[
             "contract_price"
@@ -269,22 +348,29 @@ def calculate_basic_metrics(
     denominator = np.sum(
         (
             actual
-            - np.mean(actual)
+            - np.mean(
+                actual
+            )
         )
         ** 2
     )
 
-    r2 = (
-        1
-        - np.sum(
-            (
-                actual
-                - predicted
+    if denominator == 0:
+        r2 = np.nan
+
+    else:
+        r2 = (
+            1
+            -
+            np.sum(
+                (
+                    actual
+                    - predicted
+                )
+                ** 2
             )
-            ** 2
+            / denominator
         )
-        / denominator
-    )
 
     median_absolute_error = (
         np.median(
@@ -302,6 +388,20 @@ def calculate_basic_metrics(
         )
     )
 
+    mean_signed_error = (
+        df[
+            "prediction_error"
+        ]
+        .mean()
+    )
+
+    mean_signed_percentage_error = (
+        df[
+            "signed_percentage_error"
+        ]
+        .mean()
+    )
+
     summary = pd.DataFrame(
         {
             "metric": [
@@ -311,8 +411,11 @@ def calculate_basic_metrics(
                 "R2",
                 "Median Absolute Error",
                 "Median Percentage Error",
+                "Mean Signed Error",
+                "Mean Signed Percentage Error",
                 "Test Rows",
             ],
+
             "value": [
                 mae,
                 rmse,
@@ -320,6 +423,8 @@ def calculate_basic_metrics(
                 r2,
                 median_absolute_error,
                 median_percentage_error,
+                mean_signed_error,
+                mean_signed_percentage_error,
                 len(df),
             ],
         }
@@ -328,183 +433,13 @@ def calculate_basic_metrics(
     return summary
 
 
-def plot_actual_vs_predicted(
-    df: pd.DataFrame,
-) -> None:
-
-    fig, ax = plt.subplots(
-        figsize=(9, 7)
-    )
-
-    ax.scatter(
-        df[
-            "contract_price"
-        ],
-        df[
-            "predicted_contract_price"
-        ],
-        alpha=0.35,
-        s=15,
-    )
-
-    minimum = min(
-        df[
-            "contract_price"
-        ].min(),
-        df[
-            "predicted_contract_price"
-        ].min(),
-    )
-
-    maximum = max(
-        df[
-            "contract_price"
-        ].max(),
-        df[
-            "predicted_contract_price"
-        ].max(),
-    )
-
-    ax.plot(
-        [
-            minimum,
-            maximum,
-        ],
-        [
-            minimum,
-            maximum,
-        ],
-        linestyle="--",
-        label="完全一致ライン",
-    )
-
-    formatter = FuncFormatter(
-        yen_to_man_yen
-    )
-
-    ax.xaxis.set_major_formatter(
-        formatter
-    )
-
-    ax.yaxis.set_major_formatter(
-        formatter
-    )
-
-    ax.set_title(
-        "実際の成約価格 vs AI予測価格"
-    )
-
-    ax.set_xlabel(
-        "実際の成約価格（万円）"
-    )
-
-    ax.set_ylabel(
-        "AI予測成約価格（万円）"
-    )
-
-    ax.legend()
-
-    ax.grid(
-        alpha=0.2
-    )
-
-    fig.tight_layout()
-
-    fig.savefig(
-        REPORT_DIR
-        / "actual_vs_predicted.png",
-        dpi=160,
-        bbox_inches="tight",
-    )
-
-    plt.close(fig)
-
-
-def plot_error_distribution(
-    df: pd.DataFrame,
-) -> None:
-
-    upper_limit = (
-        df[
-            "percentage_error"
-        ]
-        .quantile(
-            0.99
-        )
-    )
-
-    plot_data = (
-        df[
-            "percentage_error"
-        ]
-        .clip(
-            upper=upper_limit
-        )
-    )
-
-    median_value = (
-        df[
-            "percentage_error"
-        ]
-        .median()
-    )
-
-    fig, ax = plt.subplots(
-        figsize=(9, 6)
-    )
-
-    ax.hist(
-        plot_data,
-        bins=40,
-    )
-
-    ax.axvline(
-        median_value,
-        linestyle="--",
-        label=(
-            "中央値 "
-            f"{median_value:.1f}%"
-        ),
-    )
-
-    ax.set_title(
-        "AI予測誤差率の分布"
-    )
-
-    ax.set_xlabel(
-        "絶対誤差率（%）"
-    )
-
-    ax.set_ylabel(
-        "物件数"
-    )
-
-    ax.legend()
-
-    ax.grid(
-        alpha=0.2
-    )
-
-    fig.tight_layout()
-
-    fig.savefig(
-        REPORT_DIR
-        / "error_distribution.png",
-        dpi=160,
-        bbox_inches="tight",
-    )
-
-    plt.close(fig)
-
-
 def create_city_metrics(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-
+    df,
+):
     if "city" not in df.columns:
         return pd.DataFrame()
 
-    city_metrics = (
+    metrics = (
         df.groupby(
             "city",
             dropna=False,
@@ -514,20 +449,29 @@ def create_city_metrics(
                 "contract_price",
                 "size",
             ),
+
             actual_average=(
                 "contract_price",
                 "mean",
             ),
+
             predicted_average=(
                 "predicted_contract_price",
                 "mean",
             ),
+
             mae=(
                 "absolute_error",
                 "mean",
             ),
+
             mape=(
                 "percentage_error",
+                "mean",
+            ),
+
+            signed_error_percent=(
+                "signed_percentage_error",
                 "mean",
             ),
         )
@@ -535,7 +479,7 @@ def create_city_metrics(
     )
 
     return (
-        city_metrics
+        metrics
         .sort_values(
             "mape"
         )
@@ -545,92 +489,109 @@ def create_city_metrics(
     )
 
 
-def plot_city_mape(
-    city_metrics: pd.DataFrame,
-) -> None:
+def create_station_metrics(
+    df,
+):
+    if (
+        "station_name"
+        not in df.columns
+    ):
+        return pd.DataFrame()
 
-    if city_metrics.empty:
-        return
+    work_df = df.copy()
 
-    reliable = (
-        city_metrics[
-            city_metrics[
-                "count"
-            ]
-            >= 20
+    work_df[
+        "station_name"
+    ] = (
+        work_df[
+            "station_name"
         ]
-        .copy()
+        .astype("string")
+        .fillna("不明")
     )
 
-    if reliable.empty:
+    group_columns = [
+        "station_name"
+    ]
 
-        reliable = (
-            city_metrics
-            .sort_values(
+    if (
+        "station_line"
+        in work_df.columns
+    ):
+        work_df[
+            "station_line"
+        ] = (
+            work_df[
+                "station_line"
+            ]
+            .astype("string")
+            .fillna("不明")
+        )
+
+        group_columns.append(
+            "station_line"
+        )
+
+    metrics = (
+        work_df.groupby(
+            group_columns,
+            dropna=False,
+        )
+        .agg(
+            count=(
+                "contract_price",
+                "size",
+            ),
+
+            actual_average=(
+                "contract_price",
+                "mean",
+            ),
+
+            predicted_average=(
+                "predicted_contract_price",
+                "mean",
+            ),
+
+            mae=(
+                "absolute_error",
+                "mean",
+            ),
+
+            mape=(
+                "percentage_error",
+                "mean",
+            ),
+
+            signed_error_percent=(
+                "signed_percentage_error",
+                "mean",
+            ),
+        )
+        .reset_index()
+    )
+
+    return (
+        metrics
+        .sort_values(
+            [
                 "count",
-                ascending=False,
-            )
-            .head(20)
+                "mape",
+            ],
+            ascending=[
+                False,
+                True,
+            ],
         )
-
-    reliable = (
-        reliable
-        .sort_values(
-            "mape",
-            ascending=False,
-        )
-        .head(20)
-        .sort_values(
-            "mape"
+        .reset_index(
+            drop=True
         )
     )
-
-    fig, ax = plt.subplots(
-        figsize=(10, 8)
-    )
-
-    ax.barh(
-        reliable[
-            "city"
-        ],
-        reliable[
-            "mape"
-        ],
-    )
-
-    ax.set_title(
-        "市区町村別 AI予測誤差率"
-    )
-
-    ax.set_xlabel(
-        "MAPE（%）"
-    )
-
-    ax.set_ylabel(
-        "市区町村"
-    )
-
-    ax.grid(
-        axis="x",
-        alpha=0.2,
-    )
-
-    fig.tight_layout()
-
-    fig.savefig(
-        REPORT_DIR
-        / "city_mape.png",
-        dpi=160,
-        bbox_inches="tight",
-    )
-
-    plt.close(fig)
 
 
 def create_price_band_metrics(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-
+    df,
+):
     bins = [
         0,
         30_000_000,
@@ -673,16 +634,29 @@ def create_price_band_metrics(
                 "contract_price",
                 "size",
             ),
+
             actual_average=(
                 "contract_price",
                 "mean",
             ),
+
+            predicted_average=(
+                "predicted_contract_price",
+                "mean",
+            ),
+
             mae=(
                 "absolute_error",
                 "mean",
             ),
+
             mape=(
                 "percentage_error",
+                "mean",
+            ),
+
+            signed_error_percent=(
+                "signed_percentage_error",
                 "mean",
             ),
         )
@@ -692,15 +666,561 @@ def create_price_band_metrics(
     return metrics
 
 
-def plot_price_band_mape(
-    metrics: pd.DataFrame,
-) -> None:
+def create_model_comparison(
+    model_info,
+):
+    if not model_info:
+        return pd.DataFrame()
 
+    test_metrics = (
+        model_info.get(
+            "test_metrics",
+            {}
+        )
+    )
+
+    baseline_metrics = (
+        model_info.get(
+            "baseline_same_dataset_metrics",
+            {}
+        )
+    )
+
+    selected_name = (
+        model_info.get(
+            "selected_feature_set",
+            "Ver.5"
+        )
+    )
+
+    rows = []
+
+    if baseline_metrics:
+        rows.append(
+            {
+                "model": (
+                    "baseline_current"
+                ),
+                "description": (
+                    "駅特徴量なし"
+                ),
+                "mape": (
+                    baseline_metrics.get(
+                        "mape"
+                    )
+                ),
+                "r2": (
+                    baseline_metrics.get(
+                        "r2"
+                    )
+                ),
+                "mae": (
+                    baseline_metrics.get(
+                        "mae"
+                    )
+                ),
+                "rmse": (
+                    baseline_metrics.get(
+                        "rmse"
+                    )
+                ),
+            }
+        )
+
+    if test_metrics:
+        rows.append(
+            {
+                "model": (
+                    selected_name
+                ),
+                "description": (
+                    "駅特徴量あり"
+                ),
+                "mape": (
+                    test_metrics.get(
+                        "mape"
+                    )
+                ),
+                "r2": (
+                    test_metrics.get(
+                        "r2"
+                    )
+                ),
+                "mae": (
+                    test_metrics.get(
+                        "mae"
+                    )
+                ),
+                "rmse": (
+                    test_metrics.get(
+                        "rmse"
+                    )
+                ),
+            }
+        )
+
+    return pd.DataFrame(
+        rows
+    )
+
+
+def plot_actual_vs_predicted(
+    df,
+):
+    fig, ax = plt.subplots(
+        figsize=(
+            9,
+            7,
+        )
+    )
+
+    ax.scatter(
+        df[
+            "contract_price"
+        ],
+        df[
+            "predicted_contract_price"
+        ],
+        alpha=0.35,
+        s=15,
+    )
+
+    minimum = min(
+        df[
+            "contract_price"
+        ].min(),
+
+        df[
+            "predicted_contract_price"
+        ].min(),
+    )
+
+    maximum = max(
+        df[
+            "contract_price"
+        ].max(),
+
+        df[
+            "predicted_contract_price"
+        ].max(),
+    )
+
+    ax.plot(
+        [
+            minimum,
+            maximum,
+        ],
+        [
+            minimum,
+            maximum,
+        ],
+        linestyle="--",
+        label="完全一致ライン",
+    )
+
+    formatter = FuncFormatter(
+        yen_to_man_yen
+    )
+
+    ax.xaxis.set_major_formatter(
+        formatter
+    )
+
+    ax.yaxis.set_major_formatter(
+        formatter
+    )
+
+    ax.set_title(
+        "Ver.5 実際の成約価格 vs AI予測価格"
+    )
+
+    ax.set_xlabel(
+        "実際の成約価格（万円）"
+    )
+
+    ax.set_ylabel(
+        "AI予測成約価格（万円）"
+    )
+
+    ax.legend()
+
+    ax.grid(
+        alpha=0.2
+    )
+
+    fig.tight_layout()
+
+    fig.savefig(
+        REPORT_DIR
+        / "actual_vs_predicted.png",
+        dpi=160,
+        bbox_inches="tight",
+    )
+
+    plt.close(
+        fig
+    )
+
+
+def plot_error_distribution(
+    df,
+):
+    upper_limit = (
+        df[
+            "percentage_error"
+        ]
+        .quantile(
+            0.99
+        )
+    )
+
+    plot_data = (
+        df[
+            "percentage_error"
+        ]
+        .clip(
+            upper=upper_limit
+        )
+    )
+
+    median_value = (
+        df[
+            "percentage_error"
+        ]
+        .median()
+    )
+
+    fig, ax = plt.subplots(
+        figsize=(
+            9,
+            6,
+        )
+    )
+
+    ax.hist(
+        plot_data,
+        bins=40,
+    )
+
+    ax.axvline(
+        median_value,
+        linestyle="--",
+        label=(
+            "中央値 "
+            f"{median_value:.1f}%"
+        ),
+    )
+
+    ax.set_title(
+        "Ver.5 AI予測誤差率の分布"
+    )
+
+    ax.set_xlabel(
+        "絶対誤差率（%）"
+    )
+
+    ax.set_ylabel(
+        "物件数"
+    )
+
+    ax.legend()
+
+    ax.grid(
+        alpha=0.2
+    )
+
+    fig.tight_layout()
+
+    fig.savefig(
+        REPORT_DIR
+        / "error_distribution.png",
+        dpi=160,
+        bbox_inches="tight",
+    )
+
+    plt.close(
+        fig
+    )
+
+
+def plot_error_by_price(
+    df,
+):
+    fig, ax = plt.subplots(
+        figsize=(
+            10,
+            6,
+        )
+    )
+
+    ax.scatter(
+        df[
+            "contract_price"
+        ],
+        df[
+            "percentage_error"
+        ],
+        alpha=0.3,
+        s=15,
+    )
+
+    formatter = FuncFormatter(
+        yen_to_man_yen
+    )
+
+    ax.xaxis.set_major_formatter(
+        formatter
+    )
+
+    ax.set_title(
+        "成約価格とAI予測誤差率"
+    )
+
+    ax.set_xlabel(
+        "実際の成約価格（万円）"
+    )
+
+    ax.set_ylabel(
+        "絶対誤差率（%）"
+    )
+
+    ax.grid(
+        alpha=0.2
+    )
+
+    fig.tight_layout()
+
+    fig.savefig(
+        REPORT_DIR
+        / "error_by_price.png",
+        dpi=160,
+        bbox_inches="tight",
+    )
+
+    plt.close(
+        fig
+    )
+
+
+def plot_city_mape(
+    metrics,
+):
+    if metrics.empty:
+        return
+
+    reliable = (
+        metrics[
+            metrics[
+                "count"
+            ]
+            >= 20
+        ]
+        .copy()
+    )
+
+    if reliable.empty:
+        reliable = (
+            metrics
+            .sort_values(
+                "count",
+                ascending=False,
+            )
+            .head(
+                20
+            )
+        )
+
+    reliable = (
+        reliable
+        .sort_values(
+            "mape",
+            ascending=False,
+        )
+        .head(
+            20
+        )
+        .sort_values(
+            "mape"
+        )
+    )
+
+    fig, ax = plt.subplots(
+        figsize=(
+            10,
+            8,
+        )
+    )
+
+    ax.barh(
+        reliable[
+            "city"
+        ],
+        reliable[
+            "mape"
+        ],
+    )
+
+    ax.set_title(
+        "市区町村別 AI予測誤差率"
+    )
+
+    ax.set_xlabel(
+        "MAPE（%）"
+    )
+
+    ax.set_ylabel(
+        "市区町村"
+    )
+
+    ax.grid(
+        axis="x",
+        alpha=0.2,
+    )
+
+    fig.tight_layout()
+
+    fig.savefig(
+        REPORT_DIR
+        / "city_mape.png",
+        dpi=160,
+        bbox_inches="tight",
+    )
+
+    plt.close(
+        fig
+    )
+
+
+def plot_station_mape(
+    metrics,
+):
+    if metrics.empty:
+        return
+
+    reliable = (
+        metrics[
+            metrics[
+                "count"
+            ]
+            >= 20
+        ]
+        .copy()
+    )
+
+    if reliable.empty:
+        reliable = (
+            metrics
+            .sort_values(
+                "count",
+                ascending=False,
+            )
+            .head(
+                20
+            )
+        )
+
+    reliable = (
+        reliable
+        .sort_values(
+            "count",
+            ascending=False,
+        )
+        .head(
+            30
+        )
+    )
+
+    reliable = (
+        reliable
+        .sort_values(
+            "mape",
+            ascending=False,
+        )
+        .head(
+            20
+        )
+        .sort_values(
+            "mape"
+        )
+    )
+
+    if (
+        "station_line"
+        in reliable.columns
+    ):
+        labels = (
+            reliable[
+                "station_name"
+            ].astype(str)
+            + " / "
+            + reliable[
+                "station_line"
+            ].astype(str)
+        )
+
+    else:
+        labels = (
+            reliable[
+                "station_name"
+            ].astype(str)
+        )
+
+    fig, ax = plt.subplots(
+        figsize=(
+            11,
+            8,
+        )
+    )
+
+    ax.barh(
+        labels,
+        reliable[
+            "mape"
+        ],
+    )
+
+    ax.set_title(
+        "主要駅別 AI予測誤差率"
+    )
+
+    ax.set_xlabel(
+        "MAPE（%）"
+    )
+
+    ax.set_ylabel(
+        "最寄駅 / 路線"
+    )
+
+    ax.grid(
+        axis="x",
+        alpha=0.2,
+    )
+
+    fig.tight_layout()
+
+    fig.savefig(
+        REPORT_DIR
+        / "station_mape.png",
+        dpi=160,
+        bbox_inches="tight",
+    )
+
+    plt.close(
+        fig
+    )
+
+
+def plot_price_band_mape(
+    metrics,
+):
     if metrics.empty:
         return
 
     fig, ax = plt.subplots(
-        figsize=(11, 6)
+        figsize=(
+            11,
+            6,
+        )
     )
 
     ax.bar(
@@ -743,13 +1263,13 @@ def plot_price_band_mape(
         bbox_inches="tight",
     )
 
-    plt.close(fig)
+    plt.close(
+        fig
+    )
 
 
-def plot_feature_importance() -> None:
-
+def plot_feature_importance():
     if not FEATURE_IMPORTANCE_FILE.exists():
-
         print(
             "特徴量重要度CSVがないため"
             "グラフをスキップします。"
@@ -761,14 +1281,37 @@ def plot_feature_importance() -> None:
         FEATURE_IMPORTANCE_FILE
     )
 
-    if (
-        "feature"
-        not in df.columns
-        or
-        "importance"
-        not in df.columns
+    required_columns = [
+        "feature",
+        "importance",
+    ]
+
+    if not all(
+        column in df.columns
+        for column
+        in required_columns
     ):
+        print(
+            "特徴量重要度CSVの"
+            "形式が想定と異なります。"
+        )
+
         return
+
+    df[
+        "importance"
+    ] = pd.to_numeric(
+        df[
+            "importance"
+        ],
+        errors="coerce",
+    )
+
+    df = df[
+        df[
+            "importance"
+        ].notna()
+    ].copy()
 
     df[
         "feature_jp"
@@ -786,33 +1329,38 @@ def plot_feature_importance() -> None:
         )
     )
 
-    df = (
+    top = (
         df
         .sort_values(
             "importance",
             ascending=False,
         )
-        .head(10)
+        .head(
+            15
+        )
         .sort_values(
             "importance"
         )
     )
 
     fig, ax = plt.subplots(
-        figsize=(10, 7)
+        figsize=(
+            10,
+            7,
+        )
     )
 
     ax.barh(
-        df[
+        top[
             "feature_jp"
         ],
-        df[
+        top[
             "importance"
         ],
     )
 
     ax.set_title(
-        "価格予測に重要な特徴量 TOP10"
+        "Ver.5 CatBoost 特徴量重要度"
     )
 
     ax.set_xlabel(
@@ -837,134 +1385,339 @@ def plot_feature_importance() -> None:
         bbox_inches="tight",
     )
 
-    plt.close(fig)
+    plt.close(
+        fig
+    )
 
 
-def plot_error_by_actual_price(
-    df: pd.DataFrame,
-) -> None:
+def plot_model_comparison(
+    comparison,
+):
+    if comparison.empty:
+        return
 
-    upper_error = (
-        df[
-            "percentage_error"
+    if (
+        "mape"
+        not in comparison.columns
+    ):
+        return
+
+    work_df = comparison[
+        comparison[
+            "mape"
+        ].notna()
+    ].copy()
+
+    if work_df.empty:
+        return
+
+    labels = (
+        work_df[
+            "description"
         ]
-        .quantile(
-            0.99
+        .fillna(
+            work_df[
+                "model"
+            ]
         )
     )
 
     fig, ax = plt.subplots(
-        figsize=(9, 7)
+        figsize=(
+            8,
+            6,
+        )
     )
 
-    ax.scatter(
-        df[
-            "contract_price"
+    bars = ax.bar(
+        labels,
+        work_df[
+            "mape"
         ],
-        df[
-            "percentage_error"
-        ],
-        alpha=0.3,
-        s=15,
-    )
-
-    formatter = FuncFormatter(
-        yen_to_man_yen
-    )
-
-    ax.xaxis.set_major_formatter(
-        formatter
-    )
-
-    ax.set_ylim(
-        0,
-        upper_error,
     )
 
     ax.set_title(
-        "成約価格とAI予測誤差率の関係"
-    )
-
-    ax.set_xlabel(
-        "実際の成約価格（万円）"
+        "駅特徴量追加によるMAPE比較"
     )
 
     ax.set_ylabel(
-        "絶対誤差率（%）"
+        "MAPE（%）"
+    )
+
+    ax.set_xlabel(
+        "モデル"
     )
 
     ax.grid(
-        alpha=0.2
+        axis="y",
+        alpha=0.2,
     )
+
+    for bar, value in zip(
+        bars,
+        work_df[
+            "mape"
+        ],
+    ):
+        ax.text(
+            bar.get_x()
+            + bar.get_width()
+            / 2,
+            bar.get_height(),
+            f"{value:.2f}%",
+            ha="center",
+            va="bottom",
+        )
 
     fig.tight_layout()
 
     fig.savefig(
         REPORT_DIR
-        / "error_by_price.png",
+        / "model_comparison_mape.png",
         dpi=160,
         bbox_inches="tight",
     )
 
-    plt.close(fig)
-
-
-def show_summary(
-    summary: pd.DataFrame,
-) -> None:
-
-    values = dict(
-        zip(
-            summary[
-                "metric"
-            ],
-            summary[
-                "value"
-            ],
-        )
+    plt.close(
+        fig
     )
+
+
+def save_csv_files(
+    summary,
+    city_metrics,
+    price_band_metrics,
+    station_metrics,
+    model_comparison,
+):
+    summary.to_csv(
+        SUMMARY_FILE,
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    if not city_metrics.empty:
+        city_metrics.to_csv(
+            CITY_METRICS_FILE,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+    if not price_band_metrics.empty:
+        price_band_metrics.to_csv(
+            PRICE_BAND_METRICS_FILE,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+    if not station_metrics.empty:
+        station_metrics.to_csv(
+            STATION_METRICS_FILE,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+    if not model_comparison.empty:
+        model_comparison.to_csv(
+            MODEL_COMPARISON_FILE,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+
+def print_summary(
+    summary,
+    model_info,
+    model_comparison,
+):
+    metrics = {
+        row[
+            "metric"
+        ]: row[
+            "value"
+        ]
+        for _, row
+        in summary.iterrows()
+    }
 
     print()
     print(
-        "価格モデル分析結果"
+        "=" * 60
     )
 
     print(
-        f"MAE : "
-        f"{values['MAE']:,.0f}円"
+        "Ver.5 AI価格モデル 分析結果"
+    )
+
+    print(
+        "=" * 60
+    )
+
+    version = (
+        model_info.get(
+            "version"
+        )
+        if model_info
+        else None
+    )
+
+    feature_set = (
+        model_info.get(
+            "selected_feature_set"
+        )
+        if model_info
+        else None
+    )
+
+    if version is not None:
+        print(
+            f"Version: "
+            f"{version}"
+        )
+
+    if feature_set:
+        print(
+            f"特徴量セット: "
+            f"{feature_set}"
+        )
+
+    print()
+    print(
+        f"Test Rows: "
+        f"{int(metrics['Test Rows']):,}"
+    )
+
+    print(
+        f"MAE: "
+        f"{metrics['MAE']:,.0f}円"
     )
 
     print(
         f"RMSE: "
-        f"{values['RMSE']:,.0f}円"
+        f"{metrics['RMSE']:,.0f}円"
     )
 
     print(
         f"MAPE: "
-        f"{values['MAPE']:.2f}%"
+        f"{metrics['MAPE']:.2f}%"
     )
 
     print(
-        f"R²  : "
-        f"{values['R2']:.4f}"
+        f"R²: "
+        f"{metrics['R2']:.4f}"
     )
 
     print(
-        "誤差率中央値: "
-        f"{values['Median Percentage Error']:.2f}%"
+        "Median Absolute Error: "
+        f"{metrics['Median Absolute Error']:,.0f}円"
     )
 
     print(
-        "テスト件数: "
-        f"{int(values['Test Rows']):,}件"
+        "Median Percentage Error: "
+        f"{metrics['Median Percentage Error']:.2f}%"
+    )
+
+    if (
+        len(
+            model_comparison
+        )
+        >= 2
+    ):
+        baseline_row = (
+            model_comparison.iloc[
+                0
+            ]
+        )
+
+        station_row = (
+            model_comparison.iloc[
+                -1
+            ]
+        )
+
+        if (
+            pd.notna(
+                baseline_row[
+                    "mape"
+                ]
+            )
+            and
+            pd.notna(
+                station_row[
+                    "mape"
+                ]
+            )
+        ):
+            improvement = (
+                baseline_row[
+                    "mape"
+                ]
+                -
+                station_row[
+                    "mape"
+                ]
+            )
+
+            print()
+            print(
+                "駅特徴量の効果"
+            )
+
+            print(
+                "駅なし MAPE: "
+                f"{baseline_row['mape']:.2f}%"
+            )
+
+            print(
+                "駅あり MAPE: "
+                f"{station_row['mape']:.2f}%"
+            )
+
+            print(
+                "MAPE改善: "
+                f"{improvement:.2f}"
+                "ポイント"
+            )
+
+        if (
+            pd.notna(
+                baseline_row[
+                    "r2"
+                ]
+            )
+            and
+            pd.notna(
+                station_row[
+                    "r2"
+                ]
+            )
+        ):
+            r2_improvement = (
+                station_row[
+                    "r2"
+                ]
+                -
+                baseline_row[
+                    "r2"
+                ]
+            )
+
+            print(
+                "R²改善: "
+                f"+{r2_improvement:.4f}"
+            )
+
+    print()
+    print(
+        f"分析結果保存先: "
+        f"{REPORT_DIR}"
     )
 
 
-def main() -> None:
-
+def main():
     print(
-        "不動産価格AI "
-        "分析レポート作成"
+        "東京都中古マンション "
+        "AI価格モデル分析レポート Ver.5"
     )
 
     setup_japanese_font()
@@ -974,61 +1727,70 @@ def main() -> None:
         exist_ok=True,
     )
 
-    df = load_predictions()
+    model_info = (
+        load_model_metrics()
+    )
+
+    predictions = (
+        load_predictions()
+    )
 
     summary = (
         calculate_basic_metrics(
-            df
+            predictions
         )
-    )
-
-    summary.to_csv(
-        SUMMARY_FILE,
-        index=False,
-        encoding="utf-8-sig",
     )
 
     city_metrics = (
         create_city_metrics(
-            df
+            predictions
         )
     )
 
-    if not city_metrics.empty:
-
-        city_metrics.to_csv(
-            CITY_METRICS_FILE,
-            index=False,
-            encoding="utf-8-sig",
+    station_metrics = (
+        create_station_metrics(
+            predictions
         )
+    )
 
     price_band_metrics = (
         create_price_band_metrics(
-            df
+            predictions
         )
     )
 
-    price_band_metrics.to_csv(
-        PRICE_BAND_METRICS_FILE,
-        index=False,
-        encoding="utf-8-sig",
+    model_comparison = (
+        create_model_comparison(
+            model_info
+        )
     )
 
-    print()
-    print(
-        "グラフを作成しています..."
+    save_csv_files(
+        summary,
+        city_metrics,
+        price_band_metrics,
+        station_metrics,
+        model_comparison,
     )
 
     plot_actual_vs_predicted(
-        df
+        predictions
     )
 
     plot_error_distribution(
-        df
+        predictions
+    )
+
+    plot_error_by_price(
+        predictions
     )
 
     plot_city_mape(
         city_metrics
+    )
+
+    plot_station_mape(
+        station_metrics
     )
 
     plot_price_band_mape(
@@ -1037,51 +1799,19 @@ def main() -> None:
 
     plot_feature_importance()
 
-    plot_error_by_actual_price(
-        df
+    plot_model_comparison(
+        model_comparison
     )
 
-    show_summary(
-        summary
-    )
-
-    print()
-    print(
-        "分析レポート作成完了"
-    )
-
-    print(
-        f"保存先: "
-        f"{REPORT_DIR}"
+    print_summary(
+        summary,
+        model_info,
+        model_comparison,
     )
 
     print()
     print(
-        "生成ファイル:"
-    )
-
-    print(
-        "- actual_vs_predicted.png"
-    )
-
-    print(
-        "- error_distribution.png"
-    )
-
-    print(
-        "- city_mape.png"
-    )
-
-    print(
-        "- price_band_mape.png"
-    )
-
-    print(
-        "- feature_importance.png"
-    )
-
-    print(
-        "- error_by_price.png"
+        "分析レポート生成完了"
     )
 
 
