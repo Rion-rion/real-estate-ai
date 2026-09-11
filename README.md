@@ -2,15 +2,35 @@
 
 東京都の中古マンションを対象に、**AIによる想定成約価格の予測・売出価格との比較・価格評価・分析レポート生成**を行う機械学習システムです。
 
-国土交通省「不動産情報ライブラリ API」から取得した実際の不動産取引データと鉄道駅GISデータを利用し、Python / pandas / CatBoost を用いて、データ取得・前処理・特徴量生成・モデル学習・評価・CSV / Excel予測・分析可視化までを一連で実装しています。
+国土交通省「不動産情報ライブラリ API」から取得した実際の不動産取引データと鉄道駅GISデータを利用し、Python / pandas / CatBoost を用いて、以下を一連のパイプラインとして実装しています。
 
-Ver.5では新たに**最寄駅・路線・駅位置情報**を特徴量として導入し、同一データ条件のベースラインモデルと比較して予測精度の改善を確認しました。
+```text
+データ取得
+↓
+データクレンジング
+↓
+駅GISデータ結合
+↓
+特徴量生成
+↓
+時系列データ分割
+↓
+モデル比較・学習
+↓
+未使用期間による最終評価
+↓
+CSV / Excel予測
+↓
+価格評価
+↓
+分析レポート
+```
 
-また、成約日数予測モデルについても、学習用テンプレート・前処理・学習コードまで実装しており、実成約履歴データの確保後に学習できる構成にしています。
+Ver.5では、**最寄駅・路線・駅座標**を特徴量として追加し、同一データ条件のベースラインモデルと比較して予測精度の改善を確認しました。
 
 ---
 
-## 📌 現在の実装状況
+## 📌 実装状況
 
 | 機能 | 状態 |
 |---|---|
@@ -20,28 +40,33 @@ Ver.5では新たに**最寄駅・路線・駅位置情報**を特徴量とし�
 | データクレンジング・前処理 | ✅ 完成 |
 | CatBoost価格予測モデル | ✅ 完成 |
 | 時系列Train / Validation / Test分割 | ✅ 完成 |
-| 駅特徴量によるモデル改善 | ✅ 完成 |
-| CSVによる新規物件予測 | ✅ 完成 |
-| Excel入力・Excel出力 | ✅ 完成 |
-| 駅名 → 路線・座標自動補完 | ✅ 完成 |
-| 地区情報 → 最寄駅自動推定（Excel） | ✅ 完成 |
-| 売出価格との乖離率算出 | ✅ 完成 |
+| 駅特徴量を利用したモデル改善 | ✅ 完成 |
+| CSV価格予測 | ✅ 完成 |
+| Excel価格予測 | ✅ 完成 |
+| 駅名から路線・駅座標を自動補完 | ✅ 完成 |
+| 地区情報から代表駅を補完 | ✅ 完成 |
+| 売出価格との価格乖離率算出 | ✅ 完成 |
 | 割安 / 適正 / 割高判定 | ✅ 完成 |
-| 分析レポート・グラフ生成 | ✅ 完成 |
-| 市区町村別精度分析 | ✅ 完成 |
-| 駅別精度分析 | ✅ 完成 |
-| 価格帯別精度分析 | ✅ 完成 |
-| 成約日数学習データ前処理 | ✅ 完成 |
+| 市区町村別・駅別・価格帯別分析 | ✅ 完成 |
+| Docker実行 | ✅ 完成 |
+| 成約日数学習用データ前処理 | ✅ 完成 |
 | 成約日数モデル学習コード | ✅ 完成 |
-| 成約日数モデル本学習 | ⏳ 実成約データ待ち |
+| 成約日数モデル本学習・精度評価 | ⏳ 教師データ待ち |
 
 ---
 
-## 🎯 目的
+# 🎯 目的
 
-不動産会社の査定・売出価格設定・価格改定判断を支援するAIシステムを想定しています。
+不動産会社における、
 
-物件条件を入力すると、以下を算出します。
+- 査定業務
+- 売出価格設定
+- 価格改定判断
+- 周辺相場との比較
+
+を支援することを想定したAIシステムです。
+
+物件情報と売出価格を入力すると、以下を算出します。
 
 - AI想定㎡単価
 - AI想定成約価格
@@ -53,16 +78,14 @@ Ver.5では新たに**最寄駅・路線・駅位置情報**を特徴量とし�
   - やや割高
   - 割高
 
-システムの基本フローは以下です。
-
 ```text
 物件情報
    ↓
-最寄駅・路線・駅座標補完
+駅情報補完
    ↓
 価格予測AI
    ↓
-AI推定適正価格
+AI想定成約価格
    ↓
 売出価格との比較
    ↓
@@ -71,31 +94,15 @@ AI推定適正価格
 価格評価
 ```
 
-将来的な成約日数AIでは、価格AIの予測結果と売出価格との乖離率を入力特徴量として利用します。
-
-```text
-物件条件
-   ↓
-価格予測AI
-   ↓
-AI推定適正価格
-   ↓
-売出価格との乖離率
-   ↓
-成約日数予測AI
-   ↓
-予想成約日数
-```
-
 ---
 
-## 🛠 使用技術
+# 🛠 使用技術
 
-### Language
+## Language
 
 - Python 3
 
-### Machine Learning / Data Analysis
+## Machine Learning / Data Analysis
 
 - CatBoost
 - pandas
@@ -103,33 +110,30 @@ AI推定適正価格
 - scikit-learn
 - matplotlib
 
-### Data / API
+## API / Data
 
 - requests
 - python-dotenv
 - 国土交通省 不動産情報ライブラリ API
 
-### Excel
+## Excel
 
 - openpyxl
 
-### Development
+## Development / Environment
 
 - Visual Studio Code
 - Git
 - GitHub
+- Docker
 
 ---
 
-## 📚 データソース
+# 📚 データ
 
 国土交通省「不動産情報ライブラリ API」を利用しています。
 
-主に以下のデータを使用します。
-
-### 不動産取引データ
-
-中古マンションの実際の成約情報から、
+価格モデルでは主に以下の情報を利用します。
 
 - 市区町村
 - 地区
@@ -139,64 +143,53 @@ AI推定適正価格
 - 築年数
 - 建物構造
 - 都市計画
-- 取引時期
-
-などを取得します。
-
-### 鉄道駅GISデータ
-
-Ver.5では、不動産取引データに紐づく最寄駅情報と鉄道駅GISを組み合わせ、
-
+- 取引年
+- 取引四半期
 - 最寄駅
 - 路線
 - 駅緯度
 - 駅経度
 
-を価格予測モデルの特徴量として追加しました。
+駅情報は、不動産取引ポイントと鉄道駅GISデータを組み合わせて付与しています。
 
-駅GISとの位置照合距離は、**物件から駅までの距離ではなく、駅ポイント同士のGISマッチ精度を確認するための値**です。
-
-そのため、徒歩距離・駅距離を表す特徴量としては使用していません。
+> GISマッチ時に使用する駅ポイント間の距離は、物件から駅までの徒歩距離を表すものではありません。  
+> そのため、徒歩分数や物件－駅間距離の特徴量としては使用していません。
 
 ---
 
-## 🗾 Ver.5 データ作成
+# 🗾 データ件数
 
-駅特徴量付きデータ取得時には、東京都周辺を含むGISタイルからデータを取得します。
-
-取得後、前処理で
+駅特徴量付きデータ取得・結合後：
 
 ```text
-Prefecture == 東京都
+194,092件
 ```
 
-のみを抽出します。
-
-最新の処理では、
+東京都データ：
 
 ```text
-取得・結合後データ: 194,092件
-東京都データ:       108,020件
-駅名取得率:         100.00%
+108,020件
 ```
 
-となっています。
+駅名取得率：
 
-前処理・外れ値除去後の価格モデル学習データは、
+```text
+100.00%
+```
+
+外れ値除去などの前処理後、価格モデルに使用したデータ：
 
 ```text
 106,937件
 ```
 
-です。
-
 ---
 
-# 🤖 価格予測AI Ver.5
+# 🤖 価格予測モデル Ver.5
 
 価格予測には `CatBoostRegressor` を使用しています。
 
-成約価格そのものを直接学習するのではなく、**成約㎡単価を予測し、専有面積を掛けて最終成約価格を算出**します。
+成約価格そのものを直接予測するのではなく、**成約㎡単価を予測した後、専有面積を掛けて最終価格を算出**します。
 
 ```text
 物件情報
@@ -210,40 +203,35 @@ CatBoost
 AI予測成約価格
 ```
 
-学習時の目的変数は、
+学習時の目的変数：
 
 ```text
 log1p(contract_price_per_m2)
 ```
 
-です。
-
-対数変換することで、高価格帯物件の影響を抑えながら学習します。
+高価格物件の影響を抑えるため、㎡単価を対数変換して学習しています。
 
 ---
 
-## 🕒 時系列データ分割
+# 🕒 時系列データ分割
 
-未来データの情報が学習に混入しないように、ランダム分割ではなく**取引年による時系列分割**を採用しています。
+未来の情報が学習時に混入しないよう、ランダム分割ではなく**取引年による時系列分割**を採用しています。
 
 ```text
 2021〜2024
-   ↓
 Train
 74,745件
 
 2025
-   ↓
 Validation
 25,770件
 
 2026
-   ↓
 Final Test
 6,422件
 ```
 
-2025年データを使って特徴量セットを比較し、モデルを決定します。
+2025年データを使用して特徴量セットを比較し、モデルを選択します。
 
 その後、
 
@@ -251,21 +239,21 @@ Final Test
 2021〜2025
 ```
 
-のデータで最終モデルを再学習し、
+で最終モデルを再学習し、
 
 ```text
 2026
 ```
 
-を最終テストとして評価します。
+を最終テストとして使用しています。
 
 **2026年データはモデル選択には使用していません。**
 
 ---
 
-# 🚉 Ver.5 駅特徴量
+# 🚉 駅特徴量
 
-Ver.5では、以下の駅特徴量を追加しました。
+Ver.5では以下を追加しました。
 
 ```text
 station_name
@@ -274,7 +262,7 @@ station_latitude
 station_longitude
 ```
 
-モデル候補として、
+比較した特徴量セット：
 
 ```text
 baseline_current
@@ -283,19 +271,7 @@ station_geo
 station_geo_line
 ```
 
-を比較しました。
-
-2025年Validationの結果、最も性能が良かった
-
-```text
-station_geo_line
-```
-
-を最終採用しています。
-
----
-
-## 📊 2025 Validation
+## 2025 Validation
 
 | Feature Set | MAPE | R² |
 |---|---:|---:|
@@ -304,13 +280,21 @@ station_geo_line
 | station_geo | 16.68% | 0.8556 |
 | **station_geo_line** | **16.64%** | **0.8567** |
 
+Validationで最も性能が良かった、
+
+```text
+station_geo_line
+```
+
+を最終モデルとして採用しました。
+
 ---
 
-# 🏆 Ver.5 最終モデル精度
+# 🏆 最終テスト結果
 
-最終評価には2026年の6,422件を使用しています。
+2026年データ6,422件による最終評価結果です。
 
-| 指標 | Ver.5 |
+| 指標 | 結果 |
 |---|---:|
 | Test Rows | 6,422 |
 | MAE | **12,168,235円** |
@@ -324,12 +308,12 @@ station_geo_line
 
 # 📈 駅特徴量の効果
 
-駅特徴量の有無を**同じデータ・同じテスト期間**で比較しています。
+駅特徴量そのものの効果を確認するため、**同じデータ・同じテスト期間**でベースラインと比較しています。
 
 | Model | Test MAPE | Test R² |
 |---|---:|---:|
 | 駅特徴量なし | 17.76% | 0.8546 |
-| **Ver.5 駅特徴量あり** | **17.26%** | **0.8655** |
+| **駅特徴量あり** | **17.26%** | **0.8655** |
 
 改善幅：
 
@@ -343,7 +327,7 @@ R²
 +0.0108
 ```
 
-この比較により、最寄駅・路線・駅位置情報を追加することで、予測精度が改善することを確認しました。
+最寄駅・路線・駅座標を加えることで、同一条件のベースラインより予測精度が改善しました。
 
 ---
 
@@ -357,14 +341,14 @@ R²
 | Ver.4 | 17.71% | 0.8528 |
 | **Ver.5** | **17.26%** | **0.8655** |
 
-> Ver.4以前とVer.5ではデータ取得・前処理パイプラインの一部が変更されているため、Ver.4 → Ver.5の数値は参考比較です。  
-> 駅特徴量そのものの効果は、同一データで比較した `17.76% → 17.26%` を正式な比較値としています。
+> Ver.4以前とVer.5ではデータ取得・前処理パイプラインの一部が異なるため、Ver.4 → Ver.5は参考値です。  
+> 駅特徴量の正式な比較値には、同一データによる `17.76% → 17.26%` を使用しています。
 
 ---
 
-# 🔍 Ver.5 特徴量重要度
+# 🔍 特徴量重要度
 
-最終モデル `station_geo_line` の特徴量重要度上位は以下です。
+Ver.5最終モデルの上位特徴量：
 
 | 順位 | 特徴量 | Importance |
 |---:|---|---:|
@@ -379,15 +363,11 @@ R²
 | 9 | 最寄駅緯度 | 3.97 |
 | 10 | 都市計画 | 3.91 |
 
-駅関連特徴量が複数上位に入り、エリア価格差を表現するために有効であることが確認できます。
-
 ---
 
-# 🏠 新規物件予測
+# 🏠 CSV価格予測
 
-## CSV予測
-
-入力ファイル：
+入力：
 
 ```text
 data/input/prediction_input.csv
@@ -397,14 +377,14 @@ data/input/prediction_input.csv
 
 ```csv
 property_id,city,district_name,station_name,area_m2,floor_plan,building_age,structure,city_planning,transaction_year,transaction_quarter,asking_price,station_line,station_latitude,station_longitude
-A001,足立区,千住,北千住,65.2,3LDK,12,RC,商業地域,2026,3,45000000,,,
-A002,世田谷区,三軒茶屋,三軒茶屋,55.0,2LDK,8,RC,近隣商業地域,2026,3,60000000,,,
-A003,港区,六本木,六本木,70.0,2LDK,5,RC,商業地域,2026,3,120000000,,,
+A001,足立区,千住,北千住,65.2,3LDK,12,RC,商業地域,2026,3,65000000,,,
+A002,世田谷区,三軒茶屋,三軒茶屋,55.0,2LDK,8,RC,近隣商業地域,2026,3,110000000,,,
+A003,港区,六本木,六本木,70.0,2LDK,5,RC,商業地域,2026,3,270000000,,,
 ```
 
-`station_line`・`station_latitude`・`station_longitude` は空欄でも実行可能です。
+`station_line`・`station_latitude`・`station_longitude` は空欄でも実行できます。
 
-`station_name` から学習データ内の駅参照情報を利用して自動補完します。
+入力された `station_name` を基に、学習データ内の駅情報から自動補完します。
 
 実行：
 
@@ -420,20 +400,18 @@ output/price_predictions.csv
 
 ---
 
-# 📗 Excel予測
-
-Excel入力にも対応しています。
-
-入力：
-
-```text
-data/input/prediction_input.xlsx
-```
+# 📗 Excel価格予測
 
 実行：
 
 ```bash
 python main.py excel
+```
+
+入力：
+
+```text
+data/input/prediction_input.xlsx
 ```
 
 出力：
@@ -442,31 +420,33 @@ python main.py excel
 output/price_predictions.xlsx
 ```
 
-Excel版では `station_name` が未入力の場合、
+Excel入力で `station_name` がない場合は、
 
 ```text
-city
-+
-district_name
+city + district_name
 ```
 
-の組み合わせから、学習データ内で最も多く対応する駅を自動推定します。
+が一致する学習データの中から、**最も出現頻度の高い代表的な駅**を補完します。
 
-その後、
+これは物件位置から厳密な最寄駅を計算する処理ではありません。
+
+実際の最寄駅が分かっている場合は、入力された `station_name` を優先します。
+
+駅名確定後、
 
 ```text
 station_name
-   ↓
+↓
 station_line
 station_latitude
 station_longitude
 ```
 
-も自動補完します。
+を自動補完します。
 
 ---
 
-# 💡 Ver.5 予測例
+# 💡 予測例
 
 ## 足立区 千住
 
@@ -476,65 +456,91 @@ station_longitude
 専有面積: 65.2㎡
 ```
 
-| 項目 | 結果 |
-|---|---:|
-| AI予測㎡単価 | 1,141,896円/㎡ |
-| AI予測成約価格 | 74,451,592円 |
-| 売出価格 | 45,000,000円 |
-| 価格乖離率 | -39.56% |
-| 価格評価 | 割安 |
+AI想定成約価格：
+
+```text
+74,451,592円
+```
+
+売出価格：
+
+```text
+65,000,000円
+```
+
+価格乖離率：
+
+```text
+約 -12.69%
+```
+
+評価：
+
+```text
+割安
+```
+
+---
 
 ## 世田谷区 三軒茶屋
 
+AI想定成約価格：
+
 ```text
-最寄駅: 三軒茶屋
-路線: 田園都市線
-専有面積: 55.0㎡
+106,135,213円
 ```
 
-| 項目 | 結果 |
-|---|---:|
-| AI予測㎡単価 | 1,929,731円/㎡ |
-| AI予測成約価格 | 106,135,213円 |
-| 売出価格 | 60,000,000円 |
-| 価格乖離率 | -43.47% |
-| 価格評価 | 割安 |
+売出価格：
+
+```text
+110,000,000円
+```
+
+価格乖離率：
+
+```text
+約 +3.64%
+```
+
+評価：
+
+```text
+適正
+```
+
+---
 
 ## 港区 六本木
 
+AI想定成約価格：
+
 ```text
-最寄駅: 六本木
-路線: 2号線日比谷線
-専有面積: 70.0㎡
+234,674,334円
 ```
 
-| 項目 | 結果 |
-|---|---:|
-| AI予測㎡単価 | 3,352,490円/㎡ |
-| AI予測成約価格 | 234,674,334円 |
-| 売出価格 | 120,000,000円 |
-| 価格乖離率 | -48.87% |
-| 価格評価 | 割安 |
+売出価格：
 
-> 上記の売出価格はシステム動作確認用のサンプル値です。  
-> 価格評価は入力された売出価格とAI予測価格の比較結果です。
+```text
+270,000,000円
+```
+
+価格乖離率：
+
+```text
+約 +15.05%
+```
+
+評価：
+
+```text
+やや割高
+```
+
+> 上記の売出価格は動作確認用のサンプル値です。
 
 ---
 
 # 📉 分析レポート
-
-`analysis_report.py` により、2026年テストデータ6,422件の予測結果を自動分析します。
-
-生成される主な分析：
-
-- 実際の成約価格 vs AI予測価格
-- AI予測誤差率の分布
-- 成約価格と予測誤差率
-- 市区町村別MAPE
-- 主要駅別MAPE
-- 成約価格帯別MAPE
-- 特徴量重要度
-- 駅特徴量あり / なしのMAPE比較
 
 実行：
 
@@ -542,13 +548,24 @@ station_longitude
 python main.py report
 ```
 
-出力先：
+生成内容：
+
+- 実際の成約価格 vs AI予測価格
+- AI予測誤差率の分布
+- 成約価格と誤差率
+- 市区町村別MAPE
+- 主要駅別MAPE
+- 成約価格帯別MAPE
+- 特徴量重要度
+- 駅特徴量あり / なし比較
+
+出力：
 
 ```text
 output/analysis/
 ```
 
-主な生成ファイル：
+主なファイル：
 
 ```text
 analysis_summary.csv
@@ -569,49 +586,29 @@ model_comparison_mape.png
 
 ---
 
-## 実際の成約価格 vs AI予測価格
+# ⏱ 成約日数予測
 
-![実際の成約価格 vs AI予測価格](output/analysis/actual_vs_predicted.png)
+成約までの日数を予測するための**学習パイプラインとモデル学習コード**も実装しています。
 
-## 市区町村別 AI予測誤差率
-
-![市区町村別 AI予測誤差率](output/analysis/city_mape.png)
-
-## 主要駅別 AI予測誤差率
-
-![主要駅別 AI予測誤差率](output/analysis/station_mape.png)
-
-## 特徴量重要度
-
-![特徴量重要度](output/analysis/feature_importance.png)
-
-## 駅特徴量追加によるMAPE比較
-
-![駅特徴量追加によるMAPE比較](output/analysis/model_comparison_mape.png)
-
----
-
-# ⏱ 成約日数予測AI
-
-成約日数モデル用のコード基盤も実装しています。
+想定フロー：
 
 ```text
-contract_history.xlsx
-        ↓
-preprocessing_days.py
-        ↓
+実成約履歴
+↓
+販売開始日・成約日から成約日数算出
+↓
 価格AIで適正価格を推定
-        ↓
+↓
 売出価格との価格乖離率を生成
-        ↓
-days_training.csv
-        ↓
-train_days.py
-        ↓
-days_model.cbm
+↓
+成約日数学習データ
+↓
+CatBoost
+↓
+予想成約日数
 ```
 
-学習に使用する想定データ：
+想定する教師データ：
 
 - 販売開始日
 - 初回売出価格
@@ -622,34 +619,107 @@ days_model.cbm
 - 専有面積
 - 間取り
 - 築年数
+- 建物情報
 
-現在は実成約履歴データが不足しているため、`train_days.py` は**100件未満ではモデル学習を停止**します。
+## 現在の状態
 
-サンプルデータだけで見かけ上の高い精度を作らない設計にしています。
+成約日数を学習するためには、
 
-実データ確保後：
+```text
+販売開始日 → 成約日
+```
+
+の実履歴が必要です。
+
+現在利用している公開データからは、価格モデルに必要な成約価格データは取得できますが、販売開始日を含む十分な教師データを確保できていません。
+
+そのため、
+
+**成約日数モデルの学習パイプラインまでは実装していますが、本学習および実データによる精度評価は実施していません。**
+
+架空データによる精度を実運用精度として扱わない方針です。
+
+実成約履歴データを投入した場合は、
+
+```bash
+python main.py days-preprocess
+python main.py days-train
+```
+
+または、
 
 ```bash
 python main.py days-full
 ```
 
-で学習できます。
+で学習できる構成になっています。
 
 ---
 
-# 🗂 ディレクトリ構成
+# 🐳 Docker
+
+Dockerを利用してローカルPython環境に依存せず実行できます。
+
+## Build
+
+```bash
+docker build -t real-estate-ai .
+```
+
+## 起動確認
+
+```bash
+docker run --rm real-estate-ai
+```
+
+## CSV価格予測
+
+Windows PowerShell：
+
+```powershell
+docker run --rm `
+  -v "${PWD}/data:/app/data" `
+  -v "${PWD}/models:/app/models" `
+  -v "${PWD}/output:/app/output" `
+  real-estate-ai predict
+```
+
+Docker環境でも、
+
+- CatBoostモデル読込
+- 駅参照データ読込
+- 路線自動補完
+- 駅座標自動補完
+- Ver.5価格予測
+- ホスト側へのCSV出力
+
+まで動作確認済みです。
+
+## APIを利用する場合
+
+```powershell
+docker run --rm `
+  --env-file .env `
+  -v "${PWD}/data:/app/data" `
+  -v "${PWD}/models:/app/models" `
+  -v "${PWD}/output:/app/output" `
+  real-estate-ai station
+```
+
+`.env` はDockerイメージおよびGitHubへ含めません。
+
+---
+
+# 🗂 主なディレクトリ構成
 
 ```text
 real_estate_ai/
 ├─ data/
 │  ├─ raw/
-│  │  ├─ tokyo_contract_prices.csv
 │  │  └─ tokyo_contract_prices_station.csv
-│  │
 │  ├─ processed/
 │  │  ├─ price_training.csv
 │  │  └─ days_training.csv
-│  │
 │  └─ input/
 │     ├─ prediction_input.csv
 │     ├─ prediction_input.xlsx
@@ -661,23 +731,8 @@ real_estate_ai/
 │
 ├─ output/
 │  ├─ analysis/
-│  │  ├─ analysis_summary.csv
-│  │  ├─ city_metrics.csv
-│  │  ├─ station_metrics.csv
-│  │  ├─ price_band_metrics.csv
-│  │  ├─ model_comparison.csv
-│  │  ├─ actual_vs_predicted.png
-│  │  ├─ error_distribution.png
-│  │  ├─ error_by_price.png
-│  │  ├─ city_mape.png
-│  │  ├─ station_mape.png
-│  │  ├─ price_band_mape.png
-│  │  ├─ feature_importance.png
-│  │  └─ model_comparison_mape.png
-│  │
 │  ├─ price_model_metrics.json
 │  ├─ price_feature_importance.csv
-│  ├─ price_feature_set_comparison.csv
 │  ├─ price_final_test_comparison.csv
 │  ├─ price_test_predictions.csv
 │  ├─ price_predictions.csv
@@ -694,58 +749,40 @@ real_estate_ai/
 ├─ preprocessing_days.py
 ├─ train_days.py
 ├─ main.py
+├─ Dockerfile
+├─ .dockerignore
 ├─ requirements.txt
 ├─ .gitignore
 └─ README.md
 ```
 
-> `days_model.cbm` は実成約履歴データ確保後に生成されます。
+> `days_model.cbm` は実成約履歴データを用いて本学習を行った後に生成されます。
 
 ---
 
 # ▶ セットアップ
 
-## 1. Clone
+## Clone
 
 ```bash
 git clone https://github.com/Rion-rion/real-estate-ai.git
 cd real-estate-ai
 ```
 
-## 2. 仮想環境
-
-Windows PowerShell：
+## 仮想環境
 
 ```powershell
 python -m venv .venv
-```
-
-有効化：
-
-```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-## 3. ライブラリインストール
+## ライブラリ
 
 ```bash
 pip install -r requirements.txt
 ```
 
-現在の主要依存ライブラリ：
-
-```text
-numpy
-pandas
-requests
-python-dotenv
-catboost
-scikit-learn
-openpyxl
-matplotlib
-```
-
-## 4. APIキー設定
+## APIキー
 
 プロジェクト直下に `.env` を作成します。
 
@@ -753,77 +790,25 @@ matplotlib
 MLIT_API_KEY=YOUR_API_KEY
 ```
 
-`.env` はGit管理対象外です。
-
 ---
 
-# ▶ main.py
-
-コマンド一覧：
-
-```bash
-python main.py
-```
-
-## データ取得
-
-通常の価格データ：
-
-```bash
-python main.py collect
-```
-
-Ver.5 駅特徴量付きデータ：
-
-```bash
-python main.py station
-```
-
----
-
-## 前処理
-
-```bash
-python main.py preprocess
-```
-
----
-
-## モデル学習
-
-```bash
-python main.py train
-```
-
----
-
-## CSV予測
+# ▶ 主なコマンド
 
 ```bash
 python main.py predict
-```
-
----
-
-## Excel予測
-
-```bash
 python main.py excel
-```
-
----
-
-## 分析レポート
-
-```bash
 python main.py report
 ```
 
----
+データ取得・前処理・学習：
 
-## 価格AI一括構築
+```bash
+python main.py station
+python main.py preprocess
+python main.py train
+```
 
-既存の駅特徴量付きデータを利用：
+価格AI一括構築：
 
 ```bash
 python main.py price-full
@@ -835,17 +820,13 @@ python main.py price-full
 python main.py price-refresh
 ```
 
----
-
-## システム状態確認
+システム状態確認：
 
 ```bash
 python main.py status
 ```
 
----
-
-## 成約日数AI
+成約日数モデル：
 
 ```bash
 python main.py days-template
@@ -856,107 +837,6 @@ python main.py days-full
 
 ---
 
-## 全体構築
-
-```bash
-python main.py all
-```
-
-成約日数用の実データが不足している場合は、価格AIを構築した後、成約日数AIの学習を停止します。
-
----
-
-# 🐳 Docker
-
-Dockerを利用して、ローカルのPython環境に依存せず実行できます。
-
-## イメージ作成
-
-プロジェクト直下で実行します。
-
-```bash
-docker build -t real-estate-ai .
-```
-
-## 起動確認
-
-```bash
-docker run --rm real-estate-ai
-```
-
-`main.py` のコマンド一覧が表示されれば正常です。
-
-## システム状態確認
-
-学習データ・モデル・出力ディレクトリをホスト側からマウントして実行します。
-
-Windows PowerShell：
-
-```powershell
-docker run --rm `
-  -v "${PWD}/data:/app/data" `
-  -v "${PWD}/models:/app/models" `
-  -v "${PWD}/output:/app/output" `
-  real-estate-ai status
-```
-
-## CSV価格予測
-
-```powershell
-docker run --rm `
-  -v "${PWD}/data:/app/data" `
-  -v "${PWD}/models:/app/models" `
-  -v "${PWD}/output:/app/output" `
-  real-estate-ai predict
-```
-
-予測結果はホスト側の以下に保存されます。
-
-```text
-output/price_predictions.csv
-```
-
-## Excel価格予測
-
-```powershell
-docker run --rm `
-  -v "${PWD}/data:/app/data" `
-  -v "${PWD}/models:/app/models" `
-  -v "${PWD}/output:/app/output" `
-  real-estate-ai excel
-```
-
-出力：
-
-```text
-output/price_predictions.xlsx
-```
-
-## 国交省APIを使用する場合
-
-APIキーを保存した `.env` をコンテナへ渡します。
-
-```powershell
-docker run --rm `
-  --env-file .env `
-  -v "${PWD}/data:/app/data" `
-  -v "${PWD}/models:/app/models" `
-  -v "${PWD}/output:/app/output" `
-  real-estate-ai station
-```
-
-`.env` はDockerイメージおよびGitHubには含めません。
-
-## Dockerで確認済みの処理
-
-- Dockerイメージのビルド
-- `main.py` の起動
-- 学習済みCatBoostモデルの読み込み
-- 駅参照データ612駅の読み込み
-- 路線・緯度・経度の自動補完
-- Ver.5 CSV価格予測
-- ホスト側への予測結果出力
-
 # 🔐 セキュリティ
 
 APIキーはソースコードへ直接記述せず、
@@ -965,87 +845,60 @@ APIキーはソースコードへ直接記述せず、
 .env
 ```
 
-で管理します。
+で管理しています。
 
-`.gitignore` により、APIキーやローカルデータなどをGitHubへ公開しない構成にしています。
+`.env` はGit管理対象外です。
+
+また、rawデータ・processedデータなどの大容量ローカルデータもGit管理から除外しています。
 
 ---
 
-# ⚠️ モデル利用上の注意
+# ⚠️ モデルの制約
 
-本システムは、不動産価格査定の学習・分析・業務支援を想定した機械学習プロジェクトです。
+本システムは不動産価格の分析・査定支援を目的とした機械学習プロジェクトであり、正式な不動産鑑定評価を代替するものではありません。
 
-AI予測価格は、正式な不動産鑑定評価を代替するものではありません。
-
-現時点では、以下のような価格形成に重要な情報が十分に含まれていません。
+現在の公開データでは、以下のような価格形成に重要な情報が十分に取得できていません。
 
 - 駅徒歩分数
 - 所在階
 - 方角
 - 眺望
-- 建物総戸数
+- 総戸数
 - 管理状態
 - 室内状態
 - リフォーム詳細
-- ブランドマンション情報
+- マンションブランド
 
-そのため、AI予測値だけで売買価格を決定するのではなく、実務では追加情報や周辺相場と組み合わせて利用することを想定しています。
-
----
-
-# 🧠 このプロジェクトで実装したこと
-
-このプロジェクトでは、単に機械学習モデルを学習するだけでなく、
-
-```text
-APIデータ取得
-↓
-データクレンジング
-↓
-GISデータ結合
-↓
-特徴量設計
-↓
-時系列データ分割
-↓
-モデル比較
-↓
-CatBoost学習
-↓
-未使用期間で最終評価
-↓
-CSV予測
-↓
-Excel予測
-↓
-駅情報自動補完
-↓
-価格評価
-↓
-分析レポート自動生成
-```
-
-までを一連のシステムとして実装しました。
-
-モデル精度だけでなく、
-
-- データリーク防止
-- Train / Validation / Testの役割分離
-- ベースラインモデルとの比較
-- 実データを使用した評価
-- 自動化された推論処理
-- APIキーの環境変数管理
-- 再現可能なプロジェクト構成
-
-を意識しています。
+そのため、実運用では周辺相場や個別物件情報と組み合わせて利用することを想定しています。
 
 ---
 
-# 📌 今後
+# 🧠 このプロジェクトで重視したこと
 
-成約日数AIについては、実成約履歴データが十分に確保できた段階で本学習を行う予定です。
+単純にモデル精度だけを追うのではなく、
 
-価格予測AIについては、追加データを取得できる場合、
+- 公開実データの取得
+- GISデータとの結合
+- 欠損・外れ値処理
+- データリークの防止
+- 時系列Train / Validation / Test分割
+- Validationによるモデル選択
+- 未使用期間による最終評価
+- ベースラインとの比較
+- CSV / Excelによる推論
+- 業務を想定した価格評価
+- 分析結果の可視化
+- APIキーの安全な管理
+- Dockerによる再現性
+- 教師データがない課題では無理に精度を作らない
+
+ことを意識して実装しています。
+
+---
+
+# 📌 今後の改善候補
+
+価格予測AIでは、取得可能になれば以下の追加を検証できます。
 
 - 駅徒歩時間
 - 所在階
@@ -1053,9 +906,10 @@ Excel予測
 - マンション規模
 - 周辺地価
 - 周辺施設
-- 金利・市場環境
+- 金利
+- 市況指標
 
-などを追加特徴量として検証できます。
+成約日数AIについては、実際の販売開始日・成約日を含む成約履歴データを確保した段階で、本学習・実データ評価を行います。
 
 ---
 
