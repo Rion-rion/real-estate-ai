@@ -1,9 +1,17 @@
 from pathlib import Path
-import json
 
-import numpy as np
 import pandas as pd
-from catboost import CatBoostRegressor
+
+from predict import (
+    enrich_station_features,
+    load_model_info,
+    predict_prices,
+    prepare_input_data,
+)
+
+from predict_excel import (
+    auto_fill_station_name,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -13,18 +21,6 @@ INPUT_FILE = (
     / "data"
     / "input"
     / "contract_history.xlsx"
-)
-
-PRICE_MODEL_FILE = (
-    PROJECT_ROOT
-    / "models"
-    / "price_model.cbm"
-)
-
-PRICE_METRICS_FILE = (
-    PROJECT_ROOT
-    / "output"
-    / "price_model_metrics.json"
 )
 
 PROCESSED_DIR = (
@@ -38,98 +34,170 @@ OUTPUT_FILE = (
     / "days_training.csv"
 )
 
+INPUT_SHEET = "成約履歴"
 
-def load_contract_data() -> pd.DataFrame:
+
+REQUIRED_COLUMNS = [
+    "property_id",
+    "city",
+    "district_name",
+    "area_m2",
+    "floor_plan",
+    "building_age",
+    "listing_date",
+    "asking_price",
+    "contract_date",
+]
+
+
+NUMERIC_COLUMNS = [
+    "area_m2",
+    "building_age",
+    "asking_price",
+    "contract_price",
+    "coverage_ratio",
+    "floor_area_ratio",
+    "station_latitude",
+    "station_longitude",
+]
+
+
+TEXT_COLUMNS = [
+    "property_id",
+    "city",
+    "district_name",
+    "station_name",
+    "station_line",
+    "floor_plan",
+    "structure",
+    "renovation",
+    "use",
+    "city_planning",
+]
+
+
+def print_header(text: str) -> None:
+    print()
+    print("=" * 60)
+    print(text)
+    print("=" * 60)
+    print()
+
+
+def load_contract_data():
     if not INPUT_FILE.exists():
         raise FileNotFoundError(
-            f"成約履歴が見つかりません: {INPUT_FILE}"
+            "\n成約履歴Excelが見つかりません。\n"
+            f"{INPUT_FILE}\n\n"
+            "先に以下を実行してください。\n"
+            "python main.py days-template"
         )
 
-    df = pd.read_excel(
-        INPUT_FILE,
-        sheet_name="成約履歴",
+    try:
+        df = pd.read_excel(
+            INPUT_FILE,
+            sheet_name=INPUT_SHEET,
+        )
+
+    except ValueError as error:
+        raise RuntimeError(
+            f"\nExcel内に "
+            f"'{INPUT_SHEET}' シートが"
+            "見つかりません。"
+        ) from error
+
+    df = (
+        df
+        .dropna(how="all")
+        .reset_index(drop=True)
     )
 
+    if df.empty:
+        # 過去の学習データが残っていると、
+        # 新しい空テンプレートでも誤って再利用できてしまうため削除する。
+        if OUTPUT_FILE.exists():
+            OUTPUT_FILE.unlink()
+
+        print_header(
+            "成約日数AI: 教師データ待ち"
+        )
+
+        print(
+            "contract_history.xlsx の"
+            "「成約履歴」シートに"
+            "実成約データがありません。"
+        )
+
+        print()
+        print(
+            "販売開始日・成約日を含む"
+            "実成約履歴を入力すると、"
+            "学習データを自動生成できます。"
+        )
+
+        print()
+        print(
+            "現時点では成約日数モデルの"
+            "学習・精度評価は行いません。"
+        )
+
+        return None
+
     print(
-        f"成約履歴読み込み: {len(df):,}件"
+        f"成約履歴読み込み: "
+        f"{len(df):,}件"
     )
 
     return df
 
 
-def load_price_model():
-    if not PRICE_MODEL_FILE.exists():
-        raise FileNotFoundError(
-            "価格予測モデルが見つかりません。"
-        )
-
-    if not PRICE_METRICS_FILE.exists():
-        raise FileNotFoundError(
-            "価格モデル情報が見つかりません。"
-        )
-
-    with open(
-        PRICE_METRICS_FILE,
-        "r",
-        encoding="utf-8",
-    ) as file:
-        model_info = json.load(file)
-
-    feature_columns = model_info.get(
-        "features",
-        []
-    )
-
-    categorical_columns = model_info.get(
-        "categorical_features",
-        []
-    )
-
-    model = CatBoostRegressor()
-
-    model.load_model(
-        str(PRICE_MODEL_FILE)
-    )
-
-    return (
-        model,
-        feature_columns,
-        categorical_columns,
-    )
-
-
 def validate_columns(
     df: pd.DataFrame,
 ) -> None:
-
-    required_columns = [
-        "listing_date",
-        "contract_date",
-        "asking_price",
-        "area_m2",
-        "city",
-        "district_name",
-        "floor_plan",
-        "building_age",
-    ]
-
     missing = [
         column
-        for column in required_columns
+        for column in REQUIRED_COLUMNS
         if column not in df.columns
     ]
 
     if missing:
         raise KeyError(
-            "不足カラム: "
-            + ", ".join(missing)
+            "\n成約日数学習に必要な列が"
+            "不足しています。\n\n"
+            "不足列:\n- "
+            + "\n- ".join(missing)
         )
 
 
-def clean_data(
+def normalize_text_columns(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
+    df = df.copy()
 
+    for column in TEXT_COLUMNS:
+        if column not in df.columns:
+            continue
+
+        df[column] = (
+            df[column]
+            .astype("string")
+            .str.strip()
+            .replace(
+                {
+                    "": pd.NA,
+                    "nan": pd.NA,
+                    "None": pd.NA,
+                    "<NA>": pd.NA,
+                }
+            )
+        )
+
+    return df
+
+
+def convert_types(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
     df = df.copy()
 
     df["listing_date"] = pd.to_datetime(
@@ -142,54 +210,225 @@ def clean_data(
         errors="coerce",
     )
 
-    numeric_columns = [
-        "asking_price",
-        "contract_price",
-        "area_m2",
-        "building_age",
-        "coverage_ratio",
-        "floor_area_ratio",
-    ]
+    for column in NUMERIC_COLUMNS:
+        if column not in df.columns:
+            continue
 
-    for column in numeric_columns:
-
-        if column in df.columns:
-
-            df[column] = pd.to_numeric(
-                df[column],
-                errors="coerce",
-            )
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce",
+        )
 
     return df
+
+
+def validate_rows(
+    df: pd.DataFrame,
+) -> None:
+    errors = []
+
+    required_text = [
+        "property_id",
+        "city",
+        "district_name",
+        "floor_plan",
+    ]
+
+    for index, row in df.iterrows():
+        excel_row = index + 2
+
+        for column in required_text:
+            if pd.isna(
+                row.get(column)
+            ):
+                errors.append(
+                    f"Excel {excel_row}行目: "
+                    f"{column} が空です。"
+                )
+
+        area = row.get(
+            "area_m2"
+        )
+
+        if (
+            pd.isna(area)
+            or area <= 0
+        ):
+            errors.append(
+                f"Excel {excel_row}行目: "
+                "area_m2 が不正です。"
+            )
+
+        building_age = row.get(
+            "building_age"
+        )
+
+        if (
+            pd.isna(building_age)
+            or building_age < 0
+        ):
+            errors.append(
+                f"Excel {excel_row}行目: "
+                "building_age が不正です。"
+            )
+
+        asking_price = row.get(
+            "asking_price"
+        )
+
+        if (
+            pd.isna(asking_price)
+            or asking_price <= 0
+        ):
+            errors.append(
+                f"Excel {excel_row}行目: "
+                "asking_price が不正です。"
+            )
+
+        listing_date = row.get(
+            "listing_date"
+        )
+
+        contract_date = row.get(
+            "contract_date"
+        )
+
+        if pd.isna(
+            listing_date
+        ):
+            errors.append(
+                f"Excel {excel_row}行目: "
+                "listing_date が不正です。"
+            )
+
+        if pd.isna(
+            contract_date
+        ):
+            errors.append(
+                f"Excel {excel_row}行目: "
+                "contract_date が不正です。"
+            )
+
+        if (
+            pd.notna(listing_date)
+            and pd.notna(contract_date)
+            and contract_date <= listing_date
+        ):
+            errors.append(
+                f"Excel {excel_row}行目: "
+                "contract_date は"
+                "listing_date より"
+                "後の日付にしてください。"
+            )
+
+    duplicate_mask = (
+        df["property_id"].notna()
+        & df["property_id"].duplicated(
+            keep=False
+        )
+    )
+
+    if duplicate_mask.any():
+        duplicated_ids = (
+            df.loc[
+                duplicate_mask,
+                "property_id",
+            ]
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+        errors.append(
+            "property_id が重複しています: "
+            + ", ".join(
+                duplicated_ids
+            )
+        )
+
+    if errors:
+        print()
+        print("入力データエラー")
+
+        for error in errors[:20]:
+            print(
+                f"- {error}"
+            )
+
+        if len(errors) > 20:
+            print(
+                f"...ほか "
+                f"{len(errors) - 20:,}件"
+            )
+
+        raise ValueError(
+            "\n成約履歴Excelを"
+            "修正してください。"
+        )
 
 
 def create_date_features(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
-
     df = df.copy()
 
-    df["days_to_contract"] = (
+    df[
+        "days_to_contract"
+    ] = (
         df["contract_date"]
         - df["listing_date"]
     ).dt.days
 
-    df["listing_year"] = (
+    invalid_days = (
+        ~df[
+            "days_to_contract"
+        ].between(
+            1,
+            1000,
+        )
+    )
+
+    if invalid_days.any():
+        rows = (
+            df.index[
+                invalid_days
+            ]
+            + 2
+        ).tolist()
+
+        raise ValueError(
+            "\n成約日数が1〜1000日の"
+            "範囲外のデータがあります。\n"
+            f"Excel行: {rows[:20]}"
+        )
+
+    df[
+        "listing_year"
+    ] = (
         df["listing_date"]
         .dt.year
+        .astype(int)
     )
 
-    df["listing_month"] = (
+    df[
+        "listing_month"
+    ] = (
         df["listing_date"]
         .dt.month
+        .astype(int)
     )
 
-    df["listing_quarter"] = (
+    df[
+        "listing_quarter"
+    ] = (
         df["listing_date"]
         .dt.quarter
+        .astype(int)
     )
 
-    df["asking_price_per_m2"] = (
+    df[
+        "asking_price_per_m2"
+    ] = (
         df["asking_price"]
         / df["area_m2"]
     )
@@ -197,155 +436,161 @@ def create_date_features(
     return df
 
 
-def prepare_price_model_input(
-    df: pd.DataFrame,
-    feature_columns,
-    categorical_columns,
-) -> pd.DataFrame:
-
-    price_df = df.copy()
-
-    # 価格モデルでは transaction_year / quarter
-    # という名前で学習しているため、
-    # 売出時点の日付を使用する。
-    price_df["transaction_year"] = (
-        price_df["listing_year"]
-    )
-
-    price_df["transaction_quarter"] = (
-        price_df["listing_quarter"]
-    )
-
-    for column in feature_columns:
-
-        if column not in price_df.columns:
-            price_df[column] = np.nan
-
-        if column in categorical_columns:
-
-            price_df[column] = (
-                price_df[column]
-                .fillna("不明")
-                .astype(str)
-            )
-
-        else:
-
-            price_df[column] = pd.to_numeric(
-                price_df[column],
-                errors="coerce",
-            )
-
-    return price_df
-
-
 def create_price_ai_features(
     df: pd.DataFrame,
-    model,
-    feature_columns,
-    categorical_columns,
 ) -> pd.DataFrame:
-
     df = df.copy()
 
-    price_input = prepare_price_model_input(
-        df,
-        feature_columns,
-        categorical_columns,
-    )
+    (
+        price_model,
+        model_info,
+        price_features,
+        price_categories,
+    ) = load_model_info()
 
-    predicted_log_unit_price = (
-        model.predict(
-            price_input[
-                feature_columns
-            ]
-        )
-    )
-
-    predicted_unit_price = (
-        np.expm1(
-            predicted_log_unit_price
-        )
-    )
-
-    predicted_unit_price = np.maximum(
-        predicted_unit_price,
-        0,
-    )
-
-    df["ai_price_per_m2"] = (
-        predicted_unit_price
-    )
-
-    df["ai_estimated_price"] = (
-        df["ai_price_per_m2"]
-        * df["area_m2"]
-    )
-
-    df["price_gap_amount"] = (
-        df["asking_price"]
-        - df["ai_estimated_price"]
-    )
-
-    df["price_gap_ratio"] = (
-        df["price_gap_amount"]
-        / df["ai_estimated_price"]
-    )
-
-    return df
-
-
-def remove_invalid_rows(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-
-    before = len(df)
-
-    df = df[
-        df["listing_date"].notna()
-        & df["contract_date"].notna()
-        & df["asking_price"].notna()
-        & df["area_m2"].notna()
-        & df["days_to_contract"].notna()
-        & df["ai_estimated_price"].notna()
-    ].copy()
-
-    df = df[
-        df["days_to_contract"].between(
-            1,
-            1000,
-        )
-    ].copy()
-
-    df = df[
-        df["asking_price"] > 0
-    ].copy()
-
-    df = df[
-        df["area_m2"] > 0
-    ].copy()
-
-    df = df[
-        df["ai_estimated_price"] > 0
-    ].copy()
-
+    print()
     print(
-        f"除外件数: "
-        f"{before - len(df):,}件"
+        "成約履歴へVer.5価格AIを適用します。"
+    )
+
+    # station_name が未入力の場合は、
+    # city + district_name の学習データから
+    # 代表的な駅を補完する。
+    df = auto_fill_station_name(
+        df
+    )
+
+    # station_name を基に
+    # 路線・駅緯度・駅経度を補完する。
+    df = enrich_station_features(
+        df,
+        price_features,
+    )
+
+    # 成約日数を予測する時点で利用可能な
+    # 売出日を価格AIの時点特徴量として使用する。
+    df[
+        "transaction_year"
+    ] = df[
+        "listing_year"
+    ]
+
+    df[
+        "transaction_quarter"
+    ] = df[
+        "listing_quarter"
+    ]
+
+    price_input = prepare_input_data(
+        df,
+        price_features,
+        price_categories,
+    )
+
+    (
+        predicted_unit_price,
+        predicted_contract_price,
+    ) = predict_prices(
+        price_model,
+        price_input,
+        price_features,
+    )
+
+    df[
+        "ai_price_per_m2"
+    ] = predicted_unit_price
+
+    df[
+        "ai_estimated_price"
+    ] = predicted_contract_price
+
+    df[
+        "price_gap_amount"
+    ] = (
+        df["asking_price"]
+        - df[
+            "ai_estimated_price"
+        ]
+    )
+
+    df[
+        "price_gap_ratio"
+    ] = (
+        df[
+            "price_gap_amount"
+        ]
+        / df[
+            "ai_estimated_price"
+        ]
+    )
+
+    df[
+        "price_gap_ratio_percent"
+    ] = (
+        df[
+            "price_gap_ratio"
+        ]
+        * 100
+    )
+
+    version = model_info.get(
+        "version",
+        "unknown",
+    )
+
+    df[
+        "price_model_version"
+    ] = str(
+        version
     )
 
     return df
+
+
+def show_leakage_warning(
+    df: pd.DataFrame,
+) -> None:
+    if (
+        df["listing_year"]
+        <= 2025
+    ).any():
+        print()
+        print("注意:")
+
+        print(
+            "Ver.5価格AIは2021〜2025年の"
+            "価格データで最終学習しています。"
+        )
+
+        print()
+        print(
+            "2025年以前の履歴を利用して"
+            "成約日数AIの過去精度を"
+            "厳密に評価する場合は、"
+        )
+
+        print(
+            "価格AI特徴量についても"
+            "時間順OOF予測を使用することで、"
+            "より厳密にデータリークを"
+            "防止できます。"
+        )
 
 
 def select_columns(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
-
     columns = [
         "property_id",
 
         "city",
         "district_name",
+
+        "station_name",
+        "station_line",
+        "station_latitude",
+        "station_longitude",
+        "station_lookup_status",
 
         "area_m2",
         "floor_plan",
@@ -371,8 +616,12 @@ def select_columns(
 
         "price_gap_amount",
         "price_gap_ratio",
+        "price_gap_ratio_percent",
 
-        # 評価・確認用。学習特徴量には使わない
+        "price_model_version",
+
+        # 教師データ・評価確認用。
+        # 新規予測時の特徴量には使用しない。
         "contract_date",
         "contract_price",
 
@@ -393,7 +642,6 @@ def select_columns(
 def save_data(
     df: pd.DataFrame,
 ) -> None:
-
     PROCESSED_DIR.mkdir(
         parents=True,
         exist_ok=True,
@@ -405,52 +653,124 @@ def save_data(
         encoding="utf-8-sig",
     )
 
+    print_header(
+        "成約日数学習データ作成完了"
+    )
+
+    print(
+        f"件数: "
+        f"{len(df):,}件"
+    )
+
+    print(
+        f"保存先: "
+        f"{OUTPUT_FILE}"
+    )
+
+
+def show_summary(
+    df: pd.DataFrame,
+) -> None:
+    print()
+    print("成約日数")
+
+    print(
+        f"平均: "
+        f"{df['days_to_contract'].mean():.1f}日"
+    )
+
+    print(
+        f"中央値: "
+        f"{df['days_to_contract'].median():.1f}日"
+    )
+
+    print(
+        f"最短: "
+        f"{df['days_to_contract'].min():.0f}日"
+    )
+
+    print(
+        f"最長: "
+        f"{df['days_to_contract'].max():.0f}日"
+    )
+
     print()
     print(
-        "成約日数学習データ完成"
+        "価格AIとの乖離率"
     )
 
     print(
-        f"件数: {len(df):,}件"
+        f"平均: "
+        f"{df['price_gap_ratio_percent'].mean():.2f}%"
     )
 
     print(
-        f"保存先: {OUTPUT_FILE}"
+        f"中央値: "
+        f"{df['price_gap_ratio_percent'].median():.2f}%"
     )
 
 
-def main():
-
-    print(
-        "成約日数学習データ作成 Ver.2"
+def main() -> None:
+    print_header(
+        "東京都中古マンション "
+        "成約日数学習データ作成 Ver.5"
     )
 
     df = load_contract_data()
 
-    validate_columns(df)
+    # 教師データがない場合はエラーではなく
+    # 正常な「データ待ち」状態として終了する。
+    if df is None:
+        return
 
-    df = clean_data(df)
-
-    df = create_date_features(df)
-
-    (
-        price_model,
-        price_features,
-        price_categories,
-    ) = load_price_model()
-
-    df = create_price_ai_features(
-        df,
-        price_model,
-        price_features,
-        price_categories,
+    validate_columns(
+        df
     )
 
-    df = remove_invalid_rows(df)
+    df = normalize_text_columns(
+        df
+    )
 
-    df = select_columns(df)
+    df = convert_types(
+        df
+    )
 
-    save_data(df)
+    validate_rows(
+        df
+    )
+
+    df = create_date_features(
+        df
+    )
+
+    df = create_price_ai_features(
+        df
+    )
+
+    show_leakage_warning(
+        df
+    )
+
+    df = select_columns(
+        df
+    )
+
+    save_data(
+        df
+    )
+
+    show_summary(
+        df
+    )
+
+    print()
+    print(
+        "次のステップ:"
+    )
+
+    print(
+        "python main.py days-train"
+    )
 
 
 if __name__ == "__main__":

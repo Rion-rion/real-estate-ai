@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from catboost import CatBoostRegressor
+
 from sklearn.metrics import (
     mean_absolute_error,
     mean_squared_error,
@@ -52,6 +53,7 @@ FEATURE_IMPORTANCE_FILE = (
     / "days_feature_importance.csv"
 )
 
+
 TARGET_COLUMN = "days_to_contract"
 
 MINIMUM_ROWS = 100
@@ -60,6 +62,11 @@ MINIMUM_ROWS = 100
 FEATURE_COLUMNS = [
     "city",
     "district_name",
+
+    "station_name",
+    "station_line",
+    "station_latitude",
+    "station_longitude",
 
     "area_m2",
     "floor_plan",
@@ -89,6 +96,10 @@ FEATURE_COLUMNS = [
 CATEGORICAL_COLUMNS = [
     "city",
     "district_name",
+
+    "station_name",
+    "station_line",
+
     "floor_plan",
     "structure",
     "renovation",
@@ -97,18 +108,93 @@ CATEGORICAL_COLUMNS = [
 ]
 
 
+def print_header(
+    text: str,
+) -> None:
+    print()
+    print("=" * 60)
+    print(text)
+    print("=" * 60)
+    print()
+
+
+def show_waiting_message(
+    current_rows: int = 0,
+) -> None:
+    print_header(
+        "成約日数AI: 教師データ不足"
+    )
+
+    print(
+        f"現在の学習データ: "
+        f"{current_rows:,}件"
+    )
+
+    print(
+        f"最低必要件数: "
+        f"{MINIMUM_ROWS:,}件"
+    )
+
+    print()
+    print(
+        "少数データから不安定な精度を"
+        "算出しないため、"
+        "モデル学習は実行しません。"
+    )
+
+    print()
+    print(
+        "実成約履歴を追加した後、"
+    )
+
+    print(
+        "python main.py days-full"
+    )
+
+    print(
+        "を実行してください。"
+    )
+
+
 def load_data():
-
     if not TRAINING_FILE.exists():
-
-        raise FileNotFoundError(
-            f"days_training.csv がありません: "
-            f"{TRAINING_FILE}"
+        print_header(
+            "成約日数AI: 教師データ待ち"
         )
+
+        print(
+            "days_training.csv が"
+            "まだ作成されていません。"
+        )
+
+        print()
+        print(
+            "先に実成約履歴を入力し、"
+        )
+
+        print(
+            "python main.py days-preprocess"
+        )
+
+        print(
+            "を実行してください。"
+        )
+
+        return None
 
     df = pd.read_csv(
         TRAINING_FILE,
         low_memory=False,
+    )
+
+    df = (
+        df
+        .dropna(
+            how="all"
+        )
+        .reset_index(
+            drop=True
+        )
     )
 
     print(
@@ -117,36 +203,71 @@ def load_data():
     )
 
     if len(df) < MINIMUM_ROWS:
-
-        raise RuntimeError(
-            f"\n現在 {len(df):,}件しかありません。\n"
-            f"最低でも {MINIMUM_ROWS}件以上の"
-            "実成約データを用意してください。\n"
-            "サンプルデータだけでモデル精度を"
-            "算出しないよう停止しました。"
+        show_waiting_message(
+            len(df)
         )
+
+        return None
 
     return df
 
 
-def prepare_data(df):
+def validate_schema(
+    df: pd.DataFrame,
+) -> None:
+    required_columns = [
+        "listing_date",
+        TARGET_COLUMN,
+        *FEATURE_COLUMNS,
+    ]
 
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise KeyError(
+            "\n成約日数学習データに"
+            "必要な列が不足しています。\n\n"
+            "不足列:\n- "
+            + "\n- ".join(
+                missing_columns
+            )
+            + "\n\n"
+            "preprocessing_days.py を"
+            "最新版で再実行してください。"
+        )
+
+
+def prepare_data(
+    df: pd.DataFrame,
+):
     df = df.copy()
 
-    features = [
-        column
-        for column in FEATURE_COLUMNS
-        if column in df.columns
-    ]
+    validate_schema(
+        df
+    )
 
-    categorical = [
-        column
-        for column in CATEGORICAL_COLUMNS
-        if column in features
-    ]
+    df["listing_date"] = (
+        pd.to_datetime(
+            df["listing_date"],
+            errors="coerce",
+        )
+    )
 
-    for column in categorical:
+    if (
+        df["listing_date"]
+        .isna()
+        .any()
+    ):
+        raise ValueError(
+            "listing_date に"
+            "不正な値があります。"
+        )
 
+    for column in CATEGORICAL_COLUMNS:
         df[column] = (
             df[column]
             .fillna("不明")
@@ -155,55 +276,76 @@ def prepare_data(df):
 
     numeric_features = [
         column
-        for column in features
-        if column not in categorical
+        for column in FEATURE_COLUMNS
+        if column
+        not in CATEGORICAL_COLUMNS
     ]
 
     for column in numeric_features:
-
-        df[column] = pd.to_numeric(
-            df[column],
-            errors="coerce",
+        df[column] = (
+            pd.to_numeric(
+                df[column],
+                errors="coerce",
+            )
         )
 
-    df[TARGET_COLUMN] = pd.to_numeric(
-        df[TARGET_COLUMN],
-        errors="coerce",
+    df[TARGET_COLUMN] = (
+        pd.to_numeric(
+            df[TARGET_COLUMN],
+            errors="coerce",
+        )
     )
 
+    before = len(df)
+
     df = df[
-        df[TARGET_COLUMN].notna()
+        df[TARGET_COLUMN]
+        .notna()
     ].copy()
 
     df = df[
-        df[TARGET_COLUMN].between(
+        df[TARGET_COLUMN]
+        .between(
             1,
             1000,
         )
     ].copy()
 
-    return (
-        df,
-        features,
-        categorical,
+    removed = (
+        before
+        - len(df)
     )
 
-
-def split_data(df):
-
-    if "listing_date" in df.columns:
-
-        df["listing_date"] = pd.to_datetime(
-            df["listing_date"],
-            errors="coerce",
+    if removed:
+        print()
+        print(
+            f"不正な成約日数を除外: "
+            f"{removed:,}件"
         )
 
-        df = df.sort_values(
+    if len(df) < MINIMUM_ROWS:
+        show_waiting_message(
+            len(df)
+        )
+
+        return None
+
+    df = (
+        df
+        .sort_values(
             "listing_date"
-        ).reset_index(
+        )
+        .reset_index(
             drop=True
         )
+    )
 
+    return df
+
+
+def split_data(
+    df: pd.DataFrame,
+):
     train_end = int(
         len(df) * 0.70
     )
@@ -224,16 +366,72 @@ def split_data(df):
         validation_end:
     ].copy()
 
+    if (
+        len(train) == 0
+        or len(validation) == 0
+        or len(test) == 0
+    ):
+        raise RuntimeError(
+            "Train / Validation / Test "
+            "のいずれかが0件です。"
+        )
+
+    print_header(
+        "時間順データ分割"
+    )
+
+    print(
+        f"Train      : "
+        f"{len(train):,}件 "
+        f"(70%)"
+    )
+
+    print(
+        f"Validation : "
+        f"{len(validation):,}件 "
+        f"(15%)"
+    )
+
+    print(
+        f"Final Test : "
+        f"{len(test):,}件 "
+        f"(15%)"
+    )
+
     print()
-    print("時間順分割")
+
     print(
-        f"学習: {len(train):,}件"
+        "Train期間:"
     )
+
     print(
-        f"検証: {len(validation):,}件"
+        f"{train['listing_date'].min().date()}"
+        " ～ "
+        f"{train['listing_date'].max().date()}"
     )
+
+    print()
+
     print(
-        f"テスト: {len(test):,}件"
+        "Validation期間:"
+    )
+
+    print(
+        f"{validation['listing_date'].min().date()}"
+        " ～ "
+        f"{validation['listing_date'].max().date()}"
+    )
+
+    print()
+
+    print(
+        "Final Test期間:"
+    )
+
+    print(
+        f"{test['listing_date'].min().date()}"
+        " ～ "
+        f"{test['listing_date'].max().date()}"
     )
 
     return (
@@ -243,34 +441,13 @@ def split_data(df):
     )
 
 
-def train_model(
-    train,
-    validation,
-    features,
-    categorical,
-):
-
-    X_train = train[
-        features
-    ]
-
-    X_validation = validation[
-        features
-    ]
-
-    # 成約日数は右裾が長くなりやすいためlog変換
-    y_train = np.log1p(
-        train[TARGET_COLUMN]
-    )
-
-    y_validation = np.log1p(
-        validation[TARGET_COLUMN]
-    )
-
-    model = CatBoostRegressor(
-        iterations=2500,
+def create_model(
+    iterations: int,
+) -> CatBoostRegressor:
+    return CatBoostRegressor(
+        iterations=iterations,
         learning_rate=0.03,
-        depth=8,
+        depth=6,
         loss_function="RMSE",
         eval_metric="RMSE",
         random_seed=42,
@@ -279,15 +456,43 @@ def train_model(
         allow_writing_files=False,
     )
 
-    print()
-    print(
-        "成約日数モデル学習開始"
+
+def train_selection_model(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+):
+    print_header(
+        "成約日数AI モデル選択学習"
+    )
+
+    model = create_model(
+        iterations=2500
+    )
+
+    X_train = train[
+        FEATURE_COLUMNS
+    ]
+
+    X_validation = validation[
+        FEATURE_COLUMNS
+    ]
+
+    y_train = np.log1p(
+        train[
+            TARGET_COLUMN
+        ]
+    )
+
+    y_validation = np.log1p(
+        validation[
+            TARGET_COLUMN
+        ]
     )
 
     model.fit(
         X_train,
         y_train,
-        cat_features=categorical,
+        cat_features=CATEGORICAL_COLUMNS,
         eval_set=(
             X_validation,
             y_validation,
@@ -296,47 +501,150 @@ def train_model(
         early_stopping_rounds=150,
     )
 
-    return model
+    best_iteration = (
+        model.get_best_iteration()
+    )
+
+    if (
+        best_iteration is None
+        or best_iteration < 0
+    ):
+        best_iterations = 2500
+
+    else:
+        best_iterations = (
+            int(
+                best_iteration
+            )
+            + 1
+        )
+
+    print()
+    print(
+        f"Best iteration: "
+        f"{best_iterations:,}"
+    )
+
+    return (
+        model,
+        best_iterations,
+    )
 
 
 def predict_days(
-    model,
-    df,
-    features,
+    model: CatBoostRegressor,
+    df: pd.DataFrame,
 ):
-
-    predicted_log = model.predict(
-        df[features]
+    predicted_log = (
+        model.predict(
+            df[
+                FEATURE_COLUMNS
+            ]
+        )
     )
 
-    predicted_days = np.expm1(
-        predicted_log
+    predicted_days = (
+        np.expm1(
+            predicted_log
+        )
     )
 
-    predicted_days = np.maximum(
-        predicted_days,
-        1,
+    predicted_days = (
+        np.maximum(
+            predicted_days,
+            1,
+        )
     )
 
     return predicted_days
 
 
-def evaluate(
-    model,
-    df,
-    features,
-    name,
-):
+def calculate_mape(
+    actual,
+    predicted,
+) -> float:
+    actual = np.asarray(
+        actual,
+        dtype=float,
+    )
 
+    predicted = np.asarray(
+        predicted,
+        dtype=float,
+    )
+
+    return float(
+        np.mean(
+            np.abs(
+                (
+                    actual
+                    - predicted
+                )
+                / actual
+            )
+        )
+        * 100
+    )
+
+
+def calculate_smape(
+    actual,
+    predicted,
+) -> float:
+    actual = np.asarray(
+        actual,
+        dtype=float,
+    )
+
+    predicted = np.asarray(
+        predicted,
+        dtype=float,
+    )
+
+    denominator = (
+        np.abs(actual)
+        + np.abs(predicted)
+    )
+
+    valid = (
+        denominator > 0
+    )
+
+    if not valid.any():
+        return 0.0
+
+    return float(
+        np.mean(
+            (
+                2
+                * np.abs(
+                    predicted[valid]
+                    - actual[valid]
+                )
+            )
+            / denominator[valid]
+        )
+        * 100
+    )
+
+
+def evaluate(
+    model: CatBoostRegressor,
+    df: pd.DataFrame,
+    name: str,
+):
     predicted = predict_days(
         model,
         df,
-        features,
     )
 
     actual = (
-        df[TARGET_COLUMN]
-        .to_numpy()
+        df[
+            TARGET_COLUMN
+        ]
+        .to_numpy(
+            dtype=float
+        )
     )
 
     mae = mean_absolute_error(
@@ -351,7 +659,19 @@ def evaluate(
         )
     )
 
-    median_ae = median_absolute_error(
+    median_ae = (
+        median_absolute_error(
+            actual,
+            predicted,
+        )
+    )
+
+    mape = calculate_mape(
+        actual,
+        predicted,
+    )
+
+    smape = calculate_smape(
         actual,
         predicted,
     )
@@ -361,50 +681,163 @@ def evaluate(
         predicted,
     )
 
-    print()
-    print(
-        f"{name} 精度"
+    print_header(
+        f"{name} 評価"
     )
 
     print(
-        f"MAE      : {mae:.2f}日"
+        f"MAE       : "
+        f"{mae:.2f}日"
     )
 
     print(
-        f"RMSE     : {rmse:.2f}日"
+        f"RMSE      : "
+        f"{rmse:.2f}日"
     )
 
     print(
-        f"Median AE: {median_ae:.2f}日"
+        f"Median AE : "
+        f"{median_ae:.2f}日"
     )
 
     print(
-        f"R²       : {r2:.4f}"
+        f"MAPE      : "
+        f"{mape:.2f}%"
     )
+
+    print(
+        f"SMAPE     : "
+        f"{smape:.2f}%"
+    )
+
+    print(
+        f"R²        : "
+        f"{r2:.4f}"
+    )
+
+    metrics = {
+        "mae_days": float(
+            mae
+        ),
+        "rmse_days": float(
+            rmse
+        ),
+        "median_absolute_error_days": float(
+            median_ae
+        ),
+        "mape_percent": float(
+            mape
+        ),
+        "smape_percent": float(
+            smape
+        ),
+        "r2": float(
+            r2
+        ),
+    }
 
     return (
-        {
-            "mae_days": float(mae),
-            "rmse_days": float(rmse),
-            "median_absolute_error_days": (
-                float(median_ae)
-            ),
-            "r2": float(r2),
-        },
+        metrics,
         predicted,
     )
 
 
+def train_final_model(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    best_iterations: int,
+):
+    print_header(
+        "最終モデル再学習"
+    )
+
+    development = pd.concat(
+        [
+            train,
+            validation,
+        ],
+        ignore_index=True,
+    )
+
+    development = (
+        development
+        .sort_values(
+            "listing_date"
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+    print(
+        "Train + Validation:"
+        f" {len(development):,}件"
+    )
+
+    print(
+        f"Iterations: "
+        f"{best_iterations:,}"
+    )
+
+    model = create_model(
+        iterations=best_iterations
+    )
+
+    X = development[
+        FEATURE_COLUMNS
+    ]
+
+    y = np.log1p(
+        development[
+            TARGET_COLUMN
+        ]
+    )
+
+    model.fit(
+        X,
+        y,
+        cat_features=CATEGORICAL_COLUMNS,
+    )
+
+    return (
+        model,
+        development,
+    )
+
+
+def create_date_range(
+    df: pd.DataFrame,
+):
+    return {
+        "start": str(
+            df[
+                "listing_date"
+            ]
+            .min()
+            .date()
+        ),
+        "end": str(
+            df[
+                "listing_date"
+            ]
+            .max()
+            .date()
+        ),
+    }
+
+
 def save_results(
-    model,
-    features,
-    categorical,
+    final_model: CatBoostRegressor,
+    best_iterations: int,
+    all_rows: int,
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    development: pd.DataFrame,
+    test: pd.DataFrame,
     validation_metrics,
     test_metrics,
-    test_df,
-    predicted,
-):
-
+    test_predictions,
+) -> None:
     MODELS_DIR.mkdir(
         parents=True,
         exist_ok=True,
@@ -415,22 +848,112 @@ def save_results(
         exist_ok=True,
     )
 
-    model.save_model(
-        MODEL_FILE
+    final_model.save_model(
+        str(
+            MODEL_FILE
+        )
     )
 
     metrics = {
         "version": "1.0",
+        "status": "trained",
         "model": "CatBoostRegressor",
-        "target": "log_days_to_contract",
-        "features": features,
-        "categorical_features": categorical,
+
+        "target": (
+            "log1p(days_to_contract)"
+        ),
+
+        "minimum_training_rows": (
+            MINIMUM_ROWS
+        ),
+
+        "total_rows": int(
+            all_rows
+        ),
+
+        "best_iterations": int(
+            best_iterations
+        ),
+
+        "features": (
+            FEATURE_COLUMNS
+        ),
+
+        "categorical_features": (
+            CATEGORICAL_COLUMNS
+        ),
+
+        "split": {
+            "method": (
+                "chronological_70_15_15"
+            ),
+
+            "train_rows": int(
+                len(train)
+            ),
+
+            "validation_rows": int(
+                len(validation)
+            ),
+
+            "development_rows": int(
+                len(development)
+            ),
+
+            "test_rows": int(
+                len(test)
+            ),
+
+            "train_period": (
+                create_date_range(
+                    train
+                )
+            ),
+
+            "validation_period": (
+                create_date_range(
+                    validation
+                )
+            ),
+
+            "test_period": (
+                create_date_range(
+                    test
+                )
+            ),
+        },
+
         "validation_metrics": (
             validation_metrics
         ),
+
         "test_metrics": (
             test_metrics
         ),
+
+        "price_ai_dependency": {
+            "used": True,
+            "features": [
+                "ai_estimated_price",
+                "ai_price_per_m2",
+                "price_gap_ratio",
+            ],
+        },
+
+        "notes": [
+            (
+                "販売開始日時点で取得可能な"
+                "特徴量のみを成約日数AIへ使用"
+            ),
+            (
+                "contract_date と contract_price は"
+                "学習特徴量に使用しない"
+            ),
+            (
+                "Final Testはモデル選択に"
+                "使用しない"
+            ),
+        ],
     }
 
     with open(
@@ -438,7 +961,6 @@ def save_results(
         "w",
         encoding="utf-8",
     ) as file:
-
         json.dump(
             metrics,
             file,
@@ -446,16 +968,25 @@ def save_results(
             indent=2,
         )
 
-    result = test_df.copy()
+    result = (
+        test
+        .copy()
+        .reset_index(
+            drop=True
+        )
+    )
 
     result[
         "predicted_days_to_contract"
-    ] = np.round(
-        predicted
-    ).astype(int)
+    ] = (
+        np.round(
+            test_predictions
+        )
+        .astype(int)
+    )
 
     result[
-        "absolute_error_days"
+        "prediction_error_days"
     ] = (
         result[
             "predicted_days_to_contract"
@@ -463,7 +994,30 @@ def save_results(
         - result[
             TARGET_COLUMN
         ]
-    ).abs()
+    )
+
+    result[
+        "absolute_error_days"
+    ] = (
+        result[
+            "prediction_error_days"
+        ]
+        .abs()
+    )
+
+    result[
+        "absolute_percentage_error"
+    ] = (
+        (
+            result[
+                "absolute_error_days"
+            ]
+            / result[
+                TARGET_COLUMN
+            ]
+        )
+        * 100
+    )
 
     result.to_csv(
         PREDICTIONS_FILE,
@@ -473,16 +1027,25 @@ def save_results(
 
     importance = pd.DataFrame(
         {
-            "feature": features,
+            "feature": (
+                FEATURE_COLUMNS
+            ),
             "importance": (
-                model.get_feature_importance()
+                final_model
+                .get_feature_importance()
             ),
         }
     )
 
-    importance = importance.sort_values(
-        "importance",
-        ascending=False,
+    importance = (
+        importance
+        .sort_values(
+            "importance",
+            ascending=False,
+        )
+        .reset_index(
+            drop=True
+        )
     )
 
     importance.to_csv(
@@ -491,8 +1054,7 @@ def save_results(
         encoding="utf-8-sig",
     )
 
-    print()
-    print(
+    print_header(
         "重要特徴量 TOP10"
     )
 
@@ -506,28 +1068,45 @@ def save_results(
 
     print()
     print(
-        f"モデル: {MODEL_FILE}"
+        f"モデル: "
+        f"{MODEL_FILE}"
     )
 
     print(
-        f"精度: {METRICS_FILE}"
+        f"評価情報: "
+        f"{METRICS_FILE}"
+    )
+
+    print(
+        f"Final Test予測: "
+        f"{PREDICTIONS_FILE}"
+    )
+
+    print(
+        f"特徴量重要度: "
+        f"{FEATURE_IMPORTANCE_FILE}"
     )
 
 
-def main():
-
-    print(
-        "東京都中古マンション"
-        "成約日数予測モデル"
+def main() -> None:
+    print_header(
+        "東京都中古マンション "
+        "成約日数予測AI Ver.1"
     )
 
     df = load_data()
 
-    (
-        df,
-        features,
-        categorical,
-    ) = prepare_data(
+    if df is None:
+        return
+
+    df = prepare_data(
+        df
+    )
+
+    if df is None:
+        return
+
+    all_rows = len(
         df
     )
 
@@ -539,41 +1118,56 @@ def main():
         df
     )
 
-    model = train_model(
+    (
+        selection_model,
+        best_iterations,
+    ) = train_selection_model(
         train,
         validation,
-        features,
-        categorical,
     )
 
     (
         validation_metrics,
         _,
     ) = evaluate(
-        model,
+        selection_model,
         validation,
-        features,
-        "検証データ",
+        "Validation",
+    )
+
+    (
+        final_model,
+        development,
+    ) = train_final_model(
+        train,
+        validation,
+        best_iterations,
     )
 
     (
         test_metrics,
-        predicted,
+        test_predictions,
     ) = evaluate(
-        model,
+        final_model,
         test,
-        features,
-        "テストデータ",
+        "Final Test",
     )
 
     save_results(
-        model,
-        features,
-        categorical,
-        validation_metrics,
-        test_metrics,
-        test,
-        predicted,
+        final_model=final_model,
+        best_iterations=best_iterations,
+        all_rows=all_rows,
+        train=train,
+        validation=validation,
+        development=development,
+        test=test,
+        validation_metrics=validation_metrics,
+        test_metrics=test_metrics,
+        test_predictions=test_predictions,
+    )
+
+    print_header(
+        "成約日数予測AI 学習完了"
     )
 
 

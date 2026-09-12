@@ -1,4 +1,5 @@
 import argparse
+import csv
 import subprocess
 import sys
 from pathlib import Path
@@ -56,20 +57,29 @@ DAYS_MODEL_FILE = (
     / "days_model.cbm"
 )
 
+DAYS_PREDICTION_INPUT_FILE = (
+    PROJECT_ROOT
+    / "data"
+    / "input"
+    / "days_prediction_input.xlsx"
+)
+
+DAYS_PREDICTION_OUTPUT_FILE = (
+    PROJECT_ROOT
+    / "output"
+    / "days_predictions.xlsx"
+)
+
+MINIMUM_DAYS_ROWS = 100
+
 
 def print_header(
     text: str,
 ) -> None:
     print()
-    print(
-        "=" * 60
-    )
-    print(
-        text
-    )
-    print(
-        "=" * 60
-    )
+    print("=" * 60)
+    print(text)
+    print("=" * 60)
     print()
 
 
@@ -95,9 +105,7 @@ def run_script(
         [
             sys.executable,
             "-u",
-            str(
-                script_path
-            ),
+            str(script_path),
         ],
         cwd=PROJECT_ROOT,
     )
@@ -107,6 +115,33 @@ def run_script(
             f"{script_name} の"
             "実行に失敗しました。"
         )
+
+
+def count_csv_rows(
+    file_path: Path,
+) -> int:
+    if not file_path.exists():
+        return 0
+
+    with open(
+        file_path,
+        "r",
+        encoding="utf-8-sig",
+        newline="",
+    ) as file:
+        reader = csv.reader(
+            file
+        )
+
+        row_count = sum(
+            1
+            for _ in reader
+        )
+
+    return max(
+        row_count - 1,
+        0,
+    )
 
 
 def collect_price_data() -> None:
@@ -152,6 +187,31 @@ def create_analysis_report() -> None:
 
 
 def create_days_template() -> None:
+    if DAYS_INPUT_FILE.exists():
+        print_header(
+            "成約履歴Excelは作成済みです"
+        )
+
+        print(
+            f"ファイル: "
+            f"{DAYS_INPUT_FILE}"
+        )
+
+        print()
+        print(
+            "既存の成約履歴を保護するため、"
+            "上書きしません。"
+        )
+
+        print()
+        print(
+            "新しく作成し直す場合は、"
+            "既存ファイルを別名で保存するか"
+            "削除してください。"
+        )
+
+        return
+
     run_script(
         "create_days_template.py"
     )
@@ -163,9 +223,92 @@ def preprocess_days_data() -> None:
     )
 
 
-def train_days_model() -> None:
+def show_days_waiting_message() -> None:
+    print_header(
+        "成約日数AI: 教師データ待ち"
+    )
+
+    print(
+        "販売開始日・成約日を含む"
+        "実成約履歴がまだありません。"
+    )
+
+    print()
+    print(
+        "data/input/contract_history.xlsx"
+    )
+
+    print(
+        "の「成約履歴」シートへ"
+        "実データを入力してください。"
+    )
+
+    print()
+    print(
+        "教師データ投入後:"
+    )
+
+    print(
+        "python main.py days-full"
+    )
+
+
+def train_days_model() -> bool:
+    if not DAYS_TRAINING_FILE.exists():
+        show_days_waiting_message()
+        return False
+
+    row_count = count_csv_rows(
+        DAYS_TRAINING_FILE
+    )
+
+    if row_count < MINIMUM_DAYS_ROWS:
+        print_header(
+            "成約日数AI: 教師データ不足"
+        )
+
+        print(
+            f"現在の学習データ: "
+            f"{row_count:,}件"
+        )
+
+        print(
+            f"必要件数: "
+            f"{MINIMUM_DAYS_ROWS:,}件以上"
+        )
+
+        print()
+        print(
+            "少数データから不安定な"
+            "精度を算出しないため、"
+            "モデル学習を停止します。"
+        )
+
+        print()
+        print(
+            "実成約履歴を追加した後、"
+        )
+
+        print(
+            "python main.py days-full"
+        )
+
+        print(
+            "を実行してください。"
+        )
+
+        return False
+
     run_script(
         "train_days.py"
+    )
+
+    return True
+
+
+def predict_days_model() -> None:
+    run_script(
+        "predict_days.py"
     )
 
 
@@ -268,7 +411,7 @@ def refresh_price_model() -> None:
     )
 
 
-def build_days_model() -> None:
+def build_days_model() -> bool:
     print_header(
         "成約日数AI "
         "一括構築開始"
@@ -276,12 +419,35 @@ def build_days_model() -> None:
 
     preprocess_days_data()
 
-    train_days_model()
+    if not DAYS_TRAINING_FILE.exists():
+        show_days_waiting_message()
+        return False
+
+    trained = train_days_model()
+
+    if not trained:
+        return False
 
     print_header(
         "成約日数AI "
         "構築完了"
     )
+
+    print(
+        f"モデル: "
+        f"{DAYS_MODEL_FILE}"
+    )
+
+    print()
+    print(
+        "新規物件を予測する場合:"
+    )
+
+    print(
+        "python main.py days-predict"
+    )
+
+    return True
 
 
 def build_all() -> None:
@@ -308,15 +474,13 @@ def build_all() -> None:
     except (
         RuntimeError,
         FileNotFoundError,
+        KeyError,
         ValueError,
     ) as error:
-        print()
-        print(
-            "成約日数AIは"
-            "まだ構築されませんでした。"
+        print_header(
+            "成約日数AIを構築できませんでした"
         )
 
-        print()
         print(
             f"理由: "
             f"{error}"
@@ -324,16 +488,9 @@ def build_all() -> None:
 
         print()
         print(
-            "実成約履歴データが"
-            "100件以上集まり次第、"
-        )
-
-        print(
-            "python main.py days-full"
-        )
-
-        print(
-            "を実行してください。"
+            "入力データまたは"
+            "成約日数AI関連ファイルを"
+            "確認してください。"
         )
 
     print_header(
@@ -376,6 +533,14 @@ def show_status() -> None:
             "成約日数AIモデル",
             DAYS_MODEL_FILE,
         ),
+        (
+            "成約日数予測入力",
+            DAYS_PREDICTION_INPUT_FILE,
+        ),
+        (
+            "成約日数予測結果",
+            DAYS_PREDICTION_OUTPUT_FILE,
+        ),
     ]
 
     for name, path in files:
@@ -392,6 +557,40 @@ def show_status() -> None:
 
         print(
             f"       {path}"
+        )
+
+    if DAYS_TRAINING_FILE.exists():
+        row_count = count_csv_rows(
+            DAYS_TRAINING_FILE
+        )
+
+        print()
+        print(
+            f"成約日数学習件数: "
+            f"{row_count:,}件"
+        )
+
+        if row_count < MINIMUM_DAYS_ROWS:
+            print(
+                f"状態: 教師データ不足 "
+                f"({MINIMUM_DAYS_ROWS:,}件以上必要)"
+            )
+
+        elif DAYS_MODEL_FILE.exists():
+            print(
+                "状態: 成約日数AI学習済み"
+            )
+
+        else:
+            print(
+                "状態: 成約日数AI学習可能"
+            )
+
+    else:
+        print()
+        print(
+            "成約日数AI: "
+            "教師データ待ち"
         )
 
     print()
@@ -477,6 +676,11 @@ def show_menu() -> None:
         "       成約日数AI一括構築"
     )
 
+    print(
+        "  days-predict"
+        "    新規物件の成約日数予測"
+    )
+
     print()
     print(
         "システム"
@@ -522,18 +726,15 @@ def main() -> None:
             "days-preprocess",
             "days-train",
             "days-full",
+            "days-predict",
             "status",
             "all",
         ],
     )
 
-    args = (
-        parser.parse_args()
-    )
+    args = parser.parse_args()
 
-    command = (
-        args.command
-    )
+    command = args.command
 
     if command is None:
         show_menu()
@@ -577,6 +778,9 @@ def main() -> None:
 
     elif command == "days-full":
         build_days_model()
+
+    elif command == "days-predict":
+        predict_days_model()
 
     elif command == "status":
         show_status()
