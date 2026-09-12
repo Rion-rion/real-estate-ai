@@ -3,15 +3,9 @@ import json
 
 import numpy as np
 import pandas as pd
-
 from catboost import CatBoostRegressor
-
 from openpyxl import load_workbook
-from openpyxl.styles import (
-    Alignment,
-    Font,
-    PatternFill,
-)
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from predict import (
@@ -20,63 +14,31 @@ from predict import (
     predict_prices,
     prepare_input_data,
 )
-
-from predict_excel import (
-    auto_fill_station_name,
-)
+from predict_excel import auto_fill_station_name
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+INPUT_DIR = PROJECT_ROOT / "data" / "input"
+OUTPUT_DIR = PROJECT_ROOT / "output"
 
-INPUT_DIR = (
-    PROJECT_ROOT
-    / "data"
-    / "input"
-)
-
-INPUT_FILE = (
-    INPUT_DIR
-    / "days_prediction_input.xlsx"
-)
-
-OUTPUT_DIR = (
-    PROJECT_ROOT
-    / "output"
-)
-
-OUTPUT_FILE = (
-    OUTPUT_DIR
-    / "days_predictions.xlsx"
-)
-
-DAYS_MODEL_FILE = (
-    PROJECT_ROOT
-    / "models"
-    / "days_model.cbm"
-)
-
-DAYS_METRICS_FILE = (
-    OUTPUT_DIR
-    / "days_model_metrics.json"
-)
+INPUT_FILE = INPUT_DIR / "days_prediction_input.xlsx"
+OUTPUT_FILE = OUTPUT_DIR / "days_predictions.xlsx"
+DAYS_MODEL_FILE = PROJECT_ROOT / "models" / "days_model.cbm"
+DAYS_METRICS_FILE = OUTPUT_DIR / "days_model_metrics.json"
 
 INPUT_SHEET = "予測入力"
 DESCRIPTION_SHEET = "項目説明"
 RESULT_SHEET = "予測結果"
 MODEL_INFO_SHEET = "モデル情報"
 
-
 INPUT_COLUMNS = [
     "property_id",
-
     "city",
     "district_name",
-
     "station_name",
     "station_line",
     "station_latitude",
     "station_longitude",
-
     "area_m2",
     "floor_plan",
     "building_age",
@@ -84,14 +46,11 @@ INPUT_COLUMNS = [
     "renovation",
     "use",
     "city_planning",
-
     "coverage_ratio",
     "floor_area_ratio",
-
     "listing_date",
     "asking_price",
 ]
-
 
 REQUIRED_INPUT_COLUMNS = [
     "property_id",
@@ -103,7 +62,6 @@ REQUIRED_INPUT_COLUMNS = [
     "listing_date",
     "asking_price",
 ]
-
 
 TEXT_COLUMNS = [
     "property_id",
@@ -118,7 +76,6 @@ TEXT_COLUMNS = [
     "city_planning",
 ]
 
-
 NUMERIC_COLUMNS = [
     "station_latitude",
     "station_longitude",
@@ -129,18 +86,21 @@ NUMERIC_COLUMNS = [
     "asking_price",
 ]
 
+RECOMMENDED_INPUT_COLUMNS = [
+    "station_name",
+    "structure",
+    "city_planning",
+]
 
 SAMPLE_ROWS = [
     {
         "property_id": "P001",
         "city": "足立区",
         "district_name": "千住",
-
         "station_name": "北千住",
         "station_line": "",
         "station_latitude": "",
         "station_longitude": "",
-
         "area_m2": 65.2,
         "floor_plan": "3LDK",
         "building_age": 12,
@@ -148,10 +108,8 @@ SAMPLE_ROWS = [
         "renovation": "未改装",
         "use": "住宅",
         "city_planning": "商業地域",
-
         "coverage_ratio": 80,
         "floor_area_ratio": 400,
-
         "listing_date": "2026-09-01",
         "asking_price": 78_000_000,
     },
@@ -159,12 +117,10 @@ SAMPLE_ROWS = [
         "property_id": "P002",
         "city": "世田谷区",
         "district_name": "三軒茶屋",
-
         "station_name": "三軒茶屋",
         "station_line": "",
         "station_latitude": "",
         "station_longitude": "",
-
         "area_m2": 55.0,
         "floor_plan": "2LDK",
         "building_age": 8,
@@ -172,32 +128,17 @@ SAMPLE_ROWS = [
         "renovation": "未改装",
         "use": "住宅",
         "city_planning": "近隣商業地域",
-
         "coverage_ratio": 80,
         "floor_area_ratio": 300,
-
         "listing_date": "2026-09-01",
         "asking_price": 110_000_000,
     },
 ]
 
-
 FIELD_DESCRIPTIONS = [
-    (
-        "property_id",
-        "必須",
-        "物件識別ID",
-    ),
-    (
-        "city",
-        "必須",
-        "東京都の市区町村",
-    ),
-    (
-        "district_name",
-        "必須",
-        "町・地区名",
-    ),
+    ("property_id", "必須", "物件識別ID"),
+    ("city", "必須", "東京都の市区町村"),
+    ("district_name", "必須", "町・地区名"),
     (
         "station_name",
         "推奨",
@@ -218,67 +159,21 @@ FIELD_DESCRIPTIONS = [
         "任意",
         "駅経度。空欄の場合は駅名から補完",
     ),
-    (
-        "area_m2",
-        "必須",
-        "専有面積（㎡）",
-    ),
-    (
-        "floor_plan",
-        "必須",
-        "間取り",
-    ),
-    (
-        "building_age",
-        "必須",
-        "売出時点の築年数",
-    ),
-    (
-        "structure",
-        "推奨",
-        "建物構造",
-    ),
-    (
-        "renovation",
-        "任意",
-        "改装状況",
-    ),
-    (
-        "use",
-        "任意",
-        "物件用途",
-    ),
-    (
-        "city_planning",
-        "推奨",
-        "都市計画・用途地域",
-    ),
-    (
-        "coverage_ratio",
-        "任意",
-        "建ぺい率",
-    ),
-    (
-        "floor_area_ratio",
-        "任意",
-        "容積率",
-    ),
-    (
-        "listing_date",
-        "必須",
-        "販売開始日",
-    ),
-    (
-        "asking_price",
-        "必須",
-        "売出価格（円）",
-    ),
+    ("area_m2", "必須", "専有面積（㎡）"),
+    ("floor_plan", "必須", "間取り"),
+    ("building_age", "必須", "売出時点の築年数"),
+    ("structure", "推奨", "建物構造"),
+    ("renovation", "任意", "改装状況"),
+    ("use", "任意", "物件用途"),
+    ("city_planning", "推奨", "都市計画・用途地域"),
+    ("coverage_ratio", "任意", "建ぺい率"),
+    ("floor_area_ratio", "任意", "容積率"),
+    ("listing_date", "必須", "販売開始日"),
+    ("asking_price", "必須", "売出価格（円）"),
 ]
 
 
-def print_header(
-    text: str,
-) -> None:
+def print_header(text: str) -> None:
     print()
     print("=" * 60)
     print(text)
@@ -286,36 +181,79 @@ def print_header(
     print()
 
 
+def _style_header(worksheet, fill: PatternFill, font: Font) -> None:
+    for cell in worksheet[1]:
+        cell.fill = fill
+        cell.font = font
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+        )
+
+
+def _adjust_column_widths(worksheet, max_width: int) -> None:
+    for column_cells in worksheet.columns:
+        max_length = max(
+            (
+                len(str(cell.value))
+                for cell in column_cells
+                if cell.value is not None
+            ),
+            default=0,
+        )
+        column_letter = get_column_letter(column_cells[0].column)
+        worksheet.column_dimensions[column_letter].width = min(
+            max(max_length + 2, 12),
+            max_width,
+        )
+
+
+def _fill_headers(
+    worksheet,
+    header_map: dict,
+    columns: list[str],
+    fill: PatternFill,
+) -> None:
+    for column in columns:
+        column_index = header_map.get(column)
+        if column_index is not None:
+            worksheet.cell(row=1, column=column_index).fill = fill
+
+
+def _apply_number_format(
+    worksheet,
+    header_map: dict,
+    columns: list[str],
+    number_format: str,
+) -> None:
+    for column in columns:
+        column_index = header_map.get(column)
+
+        if column_index is None:
+            continue
+
+        for row in range(2, worksheet.max_row + 1):
+            worksheet.cell(
+                row=row,
+                column=column_index,
+            ).number_format = number_format
+
+
 def create_input_template() -> None:
-    INPUT_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    df = pd.DataFrame(
-        SAMPLE_ROWS,
-        columns=INPUT_COLUMNS,
-    )
-
+    input_df = pd.DataFrame(SAMPLE_ROWS, columns=INPUT_COLUMNS)
     description_df = pd.DataFrame(
         FIELD_DESCRIPTIONS,
-        columns=[
-            "項目名",
-            "入力区分",
-            "説明",
-        ],
+        columns=["項目名", "入力区分", "説明"],
     )
 
-    with pd.ExcelWriter(
-        INPUT_FILE,
-        engine="openpyxl",
-    ) as writer:
-        df.to_excel(
+    with pd.ExcelWriter(INPUT_FILE, engine="openpyxl") as writer:
+        input_df.to_excel(
             writer,
             index=False,
             sheet_name=INPUT_SHEET,
         )
-
         description_df.to_excel(
             writer,
             index=False,
@@ -324,131 +262,45 @@ def create_input_template() -> None:
 
     style_input_excel()
 
-    print_header(
-        "成約日数予測用Excelを作成しました"
-    )
-
-    print(
-        f"保存先: "
-        f"{INPUT_FILE}"
-    )
-
+    print_header("成約日数予測用Excelを作成しました")
+    print(f"保存先: {INPUT_FILE}")
     print()
-    print(
-        "内容を確認・編集してから"
-        "再度実行してください。"
-    )
+    print("内容を確認・編集してから再度実行してください。")
 
 
 def style_input_excel() -> None:
-    workbook = load_workbook(
-        INPUT_FILE
-    )
+    workbook = load_workbook(INPUT_FILE)
 
-    header_fill = PatternFill(
-        fill_type="solid",
-        fgColor="1F4E78",
-    )
+    header_fill = PatternFill(fill_type="solid", fgColor="1F4E78")
+    header_font = Font(color="FFFFFF", bold=True)
+    required_fill = PatternFill(fill_type="solid", fgColor="FFF2CC")
+    recommended_fill = PatternFill(fill_type="solid", fgColor="E2F0D9")
 
-    header_font = Font(
-        color="FFFFFF",
-        bold=True,
-    )
-
-    required_fill = PatternFill(
-        fill_type="solid",
-        fgColor="FFF2CC",
-    )
-
-    recommended_fill = PatternFill(
-        fill_type="solid",
-        fgColor="E2F0D9",
-    )
-
-    for sheet_name in workbook.sheetnames:
-        worksheet = workbook[
-            sheet_name
-        ]
-
+    for worksheet in workbook.worksheets:
         worksheet.freeze_panes = "A2"
+        _style_header(worksheet, header_fill, header_font)
+        _adjust_column_widths(worksheet, max_width=45)
 
-        for cell in worksheet[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-
-            cell.alignment = Alignment(
-                horizontal="center",
-                vertical="center",
-            )
-
-        for column_cells in worksheet.columns:
-            max_length = 0
-
-            column_letter = (
-                get_column_letter(
-                    column_cells[0].column
-                )
-            )
-
-            for cell in column_cells:
-                if cell.value is None:
-                    continue
-
-                max_length = max(
-                    max_length,
-                    len(
-                        str(
-                            cell.value
-                        )
-                    ),
-                )
-
-            worksheet.column_dimensions[
-                column_letter
-            ].width = min(
-                max(
-                    max_length + 2,
-                    12,
-                ),
-                45,
-            )
-
-    input_sheet = workbook[
-        INPUT_SHEET
-    ]
-
+    input_sheet = workbook[INPUT_SHEET]
     header_map = {
         cell.value: cell.column
         for cell in input_sheet[1]
     }
 
-    for column in REQUIRED_INPUT_COLUMNS:
-        if column in header_map:
-            input_sheet.cell(
-                row=1,
-                column=header_map[
-                    column
-                ],
-            ).fill = required_fill
-
-    recommended_columns = [
-        "station_name",
-        "structure",
-        "city_planning",
-    ]
-
-    for column in recommended_columns:
-        if column in header_map:
-            input_sheet.cell(
-                row=1,
-                column=header_map[
-                    column
-                ],
-            ).fill = recommended_fill
-
-    workbook.save(
-        INPUT_FILE
+    _fill_headers(
+        input_sheet,
+        header_map,
+        REQUIRED_INPUT_COLUMNS,
+        required_fill,
     )
+    _fill_headers(
+        input_sheet,
+        header_map,
+        RECOMMENDED_INPUT_COLUMNS,
+        recommended_fill,
+    )
+
+    workbook.save(INPUT_FILE)
 
 
 def load_input_data():
@@ -461,39 +313,21 @@ def load_input_data():
             INPUT_FILE,
             sheet_name=INPUT_SHEET,
         )
-
     except ValueError as error:
         raise RuntimeError(
-            f"'{INPUT_SHEET}' シートが"
-            "見つかりません。"
+            f"'{INPUT_SHEET}' シートが見つかりません。"
         ) from error
 
-    df = (
-        df
-        .dropna(
-            how="all"
-        )
-        .reset_index(
-            drop=True
-        )
-    )
+    df = df.dropna(how="all").reset_index(drop=True)
 
     if df.empty:
-        raise RuntimeError(
-            "予測対象物件がありません。"
-        )
+        raise RuntimeError("予測対象物件がありません。")
 
-    print(
-        f"成約日数予測対象: "
-        f"{len(df):,}件"
-    )
-
+    print(f"成約日数予測対象: {len(df):,}件")
     return df
 
 
-def validate_input_columns(
-    df: pd.DataFrame,
-) -> None:
+def validate_input_columns(df: pd.DataFrame) -> None:
     missing = [
         column
         for column in REQUIRED_INPUT_COLUMNS
@@ -503,15 +337,11 @@ def validate_input_columns(
     if missing:
         raise KeyError(
             "必要な入力列が不足しています:\n- "
-            + "\n- ".join(
-                missing
-            )
+            + "\n- ".join(missing)
         )
 
 
-def add_optional_columns(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
+def add_optional_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     for column in INPUT_COLUMNS:
@@ -524,55 +354,41 @@ def add_optional_columns(
                 index=df.index,
                 dtype="string",
             )
-
         else:
             df[column] = np.nan
 
     return df
 
 
-def clean_input_data(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
+def clean_input_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    validate_input_columns(
-        df
-    )
+    validate_input_columns(df)
+    df = add_optional_columns(df)
 
-    df = add_optional_columns(
-        df
-    )
+    null_text_values = {
+        "": pd.NA,
+        "nan": pd.NA,
+        "None": pd.NA,
+        "<NA>": pd.NA,
+    }
 
     for column in TEXT_COLUMNS:
         df[column] = (
             df[column]
             .astype("string")
             .str.strip()
-            .replace(
-                {
-                    "": pd.NA,
-                    "nan": pd.NA,
-                    "None": pd.NA,
-                    "<NA>": pd.NA,
-                }
-            )
+            .replace(null_text_values)
         )
 
     for column in NUMERIC_COLUMNS:
-        df[column] = (
-            pd.to_numeric(
-                df[column],
-                errors="coerce",
-            )
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce",
         )
 
-    df[
-        "listing_date"
-    ] = pd.to_datetime(
-        df[
-            "listing_date"
-        ],
+    df["listing_date"] = pd.to_datetime(
+        df["listing_date"],
         errors="coerce",
     )
 
@@ -587,156 +403,82 @@ def clean_input_data(
             "district_name",
             "floor_plan",
         ]:
-            if pd.isna(
-                row[column]
-            ):
+            if pd.isna(row[column]):
                 errors.append(
-                    f"{excel_row}行目: "
-                    f"{column} が空です。"
+                    f"{excel_row}行目: {column} が空です。"
                 )
 
-        if (
-            pd.isna(
-                row["area_m2"]
-            )
-            or row["area_m2"] <= 0
-        ):
+        if pd.isna(row["area_m2"]) or row["area_m2"] <= 0:
             errors.append(
-                f"{excel_row}行目: "
-                "area_m2 が不正です。"
+                f"{excel_row}行目: area_m2 が不正です。"
             )
 
         if (
-            pd.isna(
-                row["building_age"]
-            )
+            pd.isna(row["building_age"])
             or row["building_age"] < 0
         ):
             errors.append(
-                f"{excel_row}行目: "
-                "building_age が不正です。"
+                f"{excel_row}行目: building_age が不正です。"
             )
 
         if (
-            pd.isna(
-                row["asking_price"]
-            )
+            pd.isna(row["asking_price"])
             or row["asking_price"] <= 0
         ):
             errors.append(
-                f"{excel_row}行目: "
-                "asking_price が不正です。"
+                f"{excel_row}行目: asking_price が不正です。"
             )
 
-        if pd.isna(
-            row[
-                "listing_date"
-            ]
-        ):
+        if pd.isna(row["listing_date"]):
             errors.append(
-                f"{excel_row}行目: "
-                "listing_date が不正です。"
+                f"{excel_row}行目: listing_date が不正です。"
             )
 
     duplicate_mask = (
-        df[
-            "property_id"
-        ].notna()
-        & df[
-            "property_id"
-        ].duplicated(
-            keep=False
-        )
+        df["property_id"].notna()
+        & df["property_id"].duplicated(keep=False)
     )
 
     if duplicate_mask.any():
         duplicates = (
-            df.loc[
-                duplicate_mask,
-                "property_id",
-            ]
+            df.loc[duplicate_mask, "property_id"]
             .astype(str)
             .unique()
             .tolist()
         )
-
         errors.append(
             "property_id が重複しています: "
-            + ", ".join(
-                duplicates
-            )
+            + ", ".join(duplicates)
         )
 
     if errors:
         print()
-        print(
-            "入力エラー"
-        )
+        print("入力エラー")
 
         for error in errors[:20]:
-            print(
-                f"- {error}"
-            )
+            print(f"- {error}")
 
-        raise ValueError(
-            "入力Excelを修正してください。"
-        )
+        raise ValueError("入力Excelを修正してください。")
 
     return df
 
 
-def create_date_features(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
+def create_date_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    df[
-        "listing_year"
-    ] = (
-        df[
-            "listing_date"
-        ]
-        .dt.year
-        .astype(int)
+    df["listing_year"] = df["listing_date"].dt.year.astype(int)
+    df["listing_month"] = df["listing_date"].dt.month.astype(int)
+    df["listing_quarter"] = (
+        df["listing_date"].dt.quarter.astype(int)
     )
-
-    df[
-        "listing_month"
-    ] = (
-        df[
-            "listing_date"
-        ]
-        .dt.month
-        .astype(int)
-    )
-
-    df[
-        "listing_quarter"
-    ] = (
-        df[
-            "listing_date"
-        ]
-        .dt.quarter
-        .astype(int)
-    )
-
-    df[
-        "asking_price_per_m2"
-    ] = (
-        df[
-            "asking_price"
-        ]
-        / df[
-            "area_m2"
-        ]
+    df["asking_price_per_m2"] = (
+        df["asking_price"] / df["area_m2"]
     )
 
     return df
 
 
-def create_price_features(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
+def create_price_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     (
@@ -747,95 +489,38 @@ def create_price_features(
     ) = load_model_info()
 
     print()
-    print(
-        "Ver.5価格AIによる"
-        "適正価格を算出します。"
-    )
+    print("Ver.5価格AIによる適正価格を算出します。")
 
-    df = auto_fill_station_name(
-        df
-    )
+    df = auto_fill_station_name(df)
+    df = enrich_station_features(df, price_features)
 
-    df = enrich_station_features(
+    df["transaction_year"] = df["listing_year"]
+    df["transaction_quarter"] = df["listing_quarter"]
+
+    price_input = prepare_input_data(
         df,
         price_features,
+        price_categories,
     )
-
-    df[
-        "transaction_year"
-    ] = df[
-        "listing_year"
-    ]
-
-    df[
-        "transaction_quarter"
-    ] = df[
-        "listing_quarter"
-    ]
-
-    price_input = (
-        prepare_input_data(
-            df,
-            price_features,
-            price_categories,
-        )
-    )
-
-    (
-        predicted_unit_price,
-        predicted_price,
-    ) = predict_prices(
+    predicted_unit_price, predicted_price = predict_prices(
         price_model,
         price_input,
         price_features,
     )
 
-    df[
-        "ai_price_per_m2"
-    ] = predicted_unit_price
-
-    df[
-        "ai_estimated_price"
-    ] = predicted_price
-
-    df[
-        "price_gap_amount"
-    ] = (
-        df[
-            "asking_price"
-        ]
-        - df[
-            "ai_estimated_price"
-        ]
+    df["ai_price_per_m2"] = predicted_unit_price
+    df["ai_estimated_price"] = predicted_price
+    df["price_gap_amount"] = (
+        df["asking_price"] - df["ai_estimated_price"]
     )
-
-    df[
-        "price_gap_ratio"
-    ] = (
-        df[
-            "price_gap_amount"
-        ]
-        / df[
-            "ai_estimated_price"
-        ]
+    df["price_gap_ratio"] = (
+        df["price_gap_amount"] / df["ai_estimated_price"]
     )
-
-    df[
-        "price_gap_ratio_percent"
-    ] = (
-        df[
-            "price_gap_ratio"
-        ]
-        * 100
+    df["price_gap_ratio_percent"] = (
+        df["price_gap_ratio"] * 100
     )
-
-    df[
-        "price_model_version"
-    ] = str(
-        price_model_info.get(
-            "version",
-            "unknown",
-        )
+    df["price_model_version"] = str(
+        price_model_info.get("version", "unknown")
     )
 
     return df
@@ -843,34 +528,17 @@ def create_price_features(
 
 def load_days_model():
     if not DAYS_MODEL_FILE.exists():
-        print_header(
-            "成約日数AI: 教師データ待ち"
-        )
-
-        print(
-            "成約日数モデルは"
-            "まだ学習されていません。"
-        )
-
+        print_header("成約日数AI: 教師データ待ち")
+        print("成約日数モデルはまだ学習されていません。")
         print()
-        print(
-            "実成約履歴を100件以上入力後、"
-        )
-
-        print(
-            "python main.py days-full"
-        )
-
-        print(
-            "を実行してください。"
-        )
-
+        print("実成約履歴を100件以上入力後、")
+        print("python main.py days-full")
+        print("を実行してください。")
         return None
 
     if not DAYS_METRICS_FILE.exists():
         raise FileNotFoundError(
-            "days_model_metrics.json が"
-            "見つかりません。"
+            "days_model_metrics.json が見つかりません。"
         )
 
     with open(
@@ -878,68 +546,35 @@ def load_days_model():
         "r",
         encoding="utf-8",
     ) as file:
-        model_info = json.load(
-            file
-        )
+        model_info = json.load(file)
 
-    feature_columns = (
-        model_info.get(
-            "features",
-            [],
-        )
-    )
-
-    categorical_columns = (
-        model_info.get(
-            "categorical_features",
-            [],
-        )
+    feature_columns = model_info.get("features", [])
+    categorical_columns = model_info.get(
+        "categorical_features",
+        [],
     )
 
     if not feature_columns:
         raise RuntimeError(
-            "days_model_metrics.json に"
-            "features がありません。"
+            "days_model_metrics.json にfeatures がありません。"
         )
 
     model = CatBoostRegressor()
-
-    model.load_model(
-        str(
-            DAYS_MODEL_FILE
-        )
-    )
+    model.load_model(str(DAYS_MODEL_FILE))
 
     print()
-    print(
-        "成約日数AI読み込み完了"
-    )
+    print("成約日数AI読み込み完了")
+    print(f"Version: {model_info.get('version', 'unknown')}")
 
-    print(
-        f"Version: "
-        f"{model_info.get('version', 'unknown')}"
-    )
+    test_metrics = model_info.get("test_metrics", {})
 
-    test_metrics = (
-        model_info.get(
-            "test_metrics",
-            {}
-        )
-    )
-
-    if (
-        "mae_days"
-        in test_metrics
-    ):
+    if "mae_days" in test_metrics:
         print(
             f"Final Test MAE: "
             f"{test_metrics['mae_days']:.2f}日"
         )
 
-    if (
-        "mape_percent"
-        in test_metrics
-    ):
+    if "mape_percent" in test_metrics:
         print(
             f"Final Test MAPE: "
             f"{test_metrics['mape_percent']:.2f}%"
@@ -968,30 +603,21 @@ def prepare_days_input(
 
     if missing_columns:
         raise KeyError(
-            "成約日数AIに必要な特徴量が"
-            "不足しています:\n- "
-            + "\n- ".join(
-                missing_columns
-            )
+            "成約日数AIに必要な特徴量が不足しています:\n- "
+            + "\n- ".join(missing_columns)
         )
 
     for column in feature_columns:
-        if (
-            column
-            in categorical_columns
-        ):
+        if column in categorical_columns:
             df[column] = (
                 df[column]
                 .fillna("不明")
                 .astype(str)
             )
-
         else:
-            df[column] = (
-                pd.to_numeric(
-                    df[column],
-                    errors="coerce",
-                )
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce",
             )
 
     return df
@@ -1002,42 +628,18 @@ def predict_contract_days(
     df: pd.DataFrame,
     feature_columns,
 ):
-    predicted_log = (
-        model.predict(
-            df[
-                feature_columns
-            ]
-        )
-    )
-
-    predicted_days = (
-        np.expm1(
-            predicted_log
-        )
-    )
-
-    predicted_days = (
-        np.maximum(
-            predicted_days,
-            1,
-        )
-    )
-
-    return predicted_days
+    predicted_log = model.predict(df[feature_columns])
+    predicted_days = np.expm1(predicted_log)
+    return np.maximum(predicted_days, 1)
 
 
-def classify_days(
-    days: int,
-) -> str:
+def classify_days(days: int) -> str:
     if days <= 30:
         return "30日以内"
-
     if days <= 60:
         return "31〜60日"
-
     if days <= 90:
         return "61〜90日"
-
     return "91日以上"
 
 
@@ -1047,77 +649,29 @@ def create_result(
 ) -> pd.DataFrame:
     result = df.copy()
 
-    result[
-        "predicted_days_to_contract"
-    ] = (
-        np.round(
-            predicted_days
-        )
-        .astype(int)
+    result["predicted_days_to_contract"] = (
+        np.round(predicted_days).astype(int)
     )
-
-    result[
-        "predicted_contract_date"
-    ] = (
-        result[
-            "listing_date"
-        ]
+    result["predicted_contract_date"] = (
+        result["listing_date"]
         + pd.to_timedelta(
-            result[
-                "predicted_days_to_contract"
-            ],
+            result["predicted_days_to_contract"],
             unit="D",
         )
     )
-
-    result[
-        "predicted_contract_period"
-    ] = (
-        result[
-            "predicted_days_to_contract"
-        ]
-        .apply(
-            classify_days
-        )
+    result["predicted_contract_period"] = (
+        result["predicted_days_to_contract"].apply(classify_days)
     )
 
-    result[
-        "ai_estimated_price"
-    ] = (
-        result[
-            "ai_estimated_price"
-        ]
-        .round()
-        .astype(int)
-    )
+    for column in [
+        "ai_estimated_price",
+        "ai_price_per_m2",
+        "price_gap_amount",
+    ]:
+        result[column] = result[column].round().astype(int)
 
-    result[
-        "ai_price_per_m2"
-    ] = (
-        result[
-            "ai_price_per_m2"
-        ]
-        .round()
-        .astype(int)
-    )
-
-    result[
-        "price_gap_amount"
-    ] = (
-        result[
-            "price_gap_amount"
-        ]
-        .round()
-        .astype(int)
-    )
-
-    result[
-        "price_gap_ratio_percent"
-    ] = (
-        result[
-            "price_gap_ratio_percent"
-        ]
-        .round(2)
+    result["price_gap_ratio_percent"] = (
+        result["price_gap_ratio_percent"].round(2)
     )
 
     return result
@@ -1127,35 +681,26 @@ def save_result(
     result: pd.DataFrame,
     days_model_info,
 ) -> None:
-    OUTPUT_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     model_info_rows = [
         {
             "項目": "成約日数モデル",
-            "値": (
-                days_model_info.get(
-                    "model",
-                    "CatBoostRegressor",
-                )
+            "値": days_model_info.get(
+                "model",
+                "CatBoostRegressor",
             ),
         },
         {
             "項目": "Version",
-            "値": (
-                days_model_info.get(
-                    "version",
-                    "unknown",
-                )
+            "値": days_model_info.get(
+                "version",
+                "unknown",
             ),
         },
         {
             "項目": "学習方式",
-            "値": (
-                "時間順 70% / 15% / 15%"
-            ),
+            "値": "時間順 70% / 15% / 15%",
         },
         {
             "項目": "価格AI連携",
@@ -1163,20 +708,13 @@ def save_result(
         },
     ]
 
-    test_metrics = (
-        days_model_info.get(
-            "test_metrics",
-            {}
-        )
-    )
+    test_metrics = days_model_info.get("test_metrics", {})
 
     if "mae_days" in test_metrics:
         model_info_rows.append(
             {
                 "項目": "Final Test MAE",
-                "値": (
-                    f"{test_metrics['mae_days']:.2f}日"
-                ),
+                "値": f"{test_metrics['mae_days']:.2f}日",
             }
         )
 
@@ -1184,26 +722,18 @@ def save_result(
         model_info_rows.append(
             {
                 "項目": "Final Test MAPE",
-                "値": (
-                    f"{test_metrics['mape_percent']:.2f}%"
-                ),
+                "値": f"{test_metrics['mape_percent']:.2f}%",
             }
         )
 
-    model_info_df = pd.DataFrame(
-        model_info_rows
-    )
+    model_info_df = pd.DataFrame(model_info_rows)
 
-    with pd.ExcelWriter(
-        OUTPUT_FILE,
-        engine="openpyxl",
-    ) as writer:
+    with pd.ExcelWriter(OUTPUT_FILE, engine="openpyxl") as writer:
         result.to_excel(
             writer,
             index=False,
             sheet_name=RESULT_SHEET,
         )
-
         model_info_df.to_excel(
             writer,
             index=False,
@@ -1212,212 +742,82 @@ def save_result(
 
     style_output_excel()
 
-    print_header(
-        "成約日数予測完了"
-    )
-
-    print(
-        f"件数: "
-        f"{len(result):,}件"
-    )
-
-    print(
-        f"保存先: "
-        f"{OUTPUT_FILE}"
-    )
+    print_header("成約日数予測完了")
+    print(f"件数: {len(result):,}件")
+    print(f"保存先: {OUTPUT_FILE}")
 
 
 def style_output_excel() -> None:
-    workbook = load_workbook(
-        OUTPUT_FILE
-    )
+    workbook = load_workbook(OUTPUT_FILE)
 
-    header_fill = PatternFill(
-        fill_type="solid",
-        fgColor="1F4E78",
-    )
+    header_fill = PatternFill(fill_type="solid", fgColor="1F4E78")
+    header_font = Font(color="FFFFFF", bold=True)
 
-    header_font = Font(
-        color="FFFFFF",
-        bold=True,
-    )
-
-    for sheet_name in workbook.sheetnames:
-        worksheet = workbook[
-            sheet_name
-        ]
-
+    for worksheet in workbook.worksheets:
         worksheet.freeze_panes = "A2"
+        _style_header(worksheet, header_fill, header_font)
+        _adjust_column_widths(worksheet, max_width=35)
 
-        for cell in worksheet[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-
-            cell.alignment = Alignment(
-                horizontal="center",
-                vertical="center",
-            )
-
-        for column_cells in worksheet.columns:
-            max_length = 0
-
-            column_letter = (
-                get_column_letter(
-                    column_cells[0].column
-                )
-            )
-
-            for cell in column_cells:
-                if cell.value is None:
-                    continue
-
-                max_length = max(
-                    max_length,
-                    len(
-                        str(
-                            cell.value
-                        )
-                    ),
-                )
-
-            worksheet.column_dimensions[
-                column_letter
-            ].width = min(
-                max(
-                    max_length + 2,
-                    12,
-                ),
-                35,
-            )
-
-    result_sheet = workbook[
-        RESULT_SHEET
-    ]
-
+    result_sheet = workbook[RESULT_SHEET]
     header_map = {
         cell.value: cell.column
         for cell in result_sheet[1]
     }
 
-    date_columns = [
-        "listing_date",
-        "predicted_contract_date",
-    ]
-
-    for column in date_columns:
-        column_index = (
-            header_map.get(
-                column
-            )
-        )
-
-        if column_index is None:
-            continue
-
-        for row in range(
-            2,
-            result_sheet.max_row + 1,
-        ):
-            result_sheet.cell(
-                row=row,
-                column=column_index,
-            ).number_format = (
-                "yyyy-mm-dd"
-            )
-
-    price_columns = [
-        "asking_price",
-        "ai_estimated_price",
-        "price_gap_amount",
-    ]
-
-    for column in price_columns:
-        column_index = (
-            header_map.get(
-                column
-            )
-        )
-
-        if column_index is None:
-            continue
-
-        for row in range(
-            2,
-            result_sheet.max_row + 1,
-        ):
-            result_sheet.cell(
-                row=row,
-                column=column_index,
-            ).number_format = (
-                '#,##0"円"'
-            )
-
-    workbook.save(
-        OUTPUT_FILE
+    _apply_number_format(
+        result_sheet,
+        header_map,
+        [
+            "listing_date",
+            "predicted_contract_date",
+        ],
+        "yyyy-mm-dd",
+    )
+    _apply_number_format(
+        result_sheet,
+        header_map,
+        [
+            "asking_price",
+            "ai_estimated_price",
+            "price_gap_amount",
+        ],
+        '#,##0"円"',
     )
 
+    workbook.save(OUTPUT_FILE)
 
-def show_predictions(
-    result: pd.DataFrame,
-) -> None:
+
+def show_predictions(result: pd.DataFrame) -> None:
     print()
-    print(
-        "成約日数AI予測結果"
-    )
+    print("成約日数AI予測結果")
 
-    for index, row in (
-        result.iterrows()
-    ):
+    for index, row in result.iterrows():
         print()
+        print("-" * 50)
+        print(f"物件 {index + 1}")
+        print(f"ID: {row['property_id']}")
         print(
-            "-" * 50
-        )
-
-        print(
-            f"物件 {index + 1}"
-        )
-
-        print(
-            f"ID: "
-            f"{row['property_id']}"
-        )
-
-        print(
-            f"地域: "
-            f"{row['city']} "
+            f"地域: {row['city']} "
             f"{row['district_name']}"
         )
-
-        print(
-            f"最寄駅: "
-            f"{row['station_name']}"
-        )
-
-        print(
-            f"売出価格: "
-            f"{row['asking_price']:,.0f}円"
-        )
-
+        print(f"最寄駅: {row['station_name']}")
+        print(f"売出価格: {row['asking_price']:,.0f}円")
         print(
             f"AI想定価格: "
             f"{row['ai_estimated_price']:,.0f}円"
         )
-
         print(
             f"価格乖離率: "
             f"{row['price_gap_ratio_percent']:+.2f}%"
         )
-
         print(
             f"予測成約日数: "
             f"{row['predicted_days_to_contract']}日"
         )
-
         print(
             f"予測成約日: "
             f"{row['predicted_contract_date'].date()}"
         )
-
         print(
             f"期間区分: "
             f"{row['predicted_contract_period']}"
@@ -1425,20 +825,13 @@ def show_predictions(
 
 
 def main() -> None:
-    print_header(
-        "東京都中古マンション "
-        "成約日数AI予測"
-    )
+    print_header("東京都中古マンション 成約日数AI予測")
 
     df = load_input_data()
-
     if df is None:
         return
 
-    days_model_data = (
-        load_days_model()
-    )
-
+    days_model_data = load_days_model()
     if days_model_data is None:
         return
 
@@ -1449,47 +842,24 @@ def main() -> None:
         days_categories,
     ) = days_model_data
 
-    df = clean_input_data(
-        df
-    )
+    df = clean_input_data(df)
+    df = create_date_features(df)
+    df = create_price_features(df)
 
-    df = create_date_features(
-        df
-    )
-
-    df = create_price_features(
-        df
-    )
-
-    days_input = (
-        prepare_days_input(
-            df,
-            days_features,
-            days_categories,
-        )
-    )
-
-    predicted_days = (
-        predict_contract_days(
-            days_model,
-            days_input,
-            days_features,
-        )
-    )
-
-    result = create_result(
+    days_input = prepare_days_input(
         df,
-        predicted_days,
+        days_features,
+        days_categories,
     )
+    predicted_days = predict_contract_days(
+        days_model,
+        days_input,
+        days_features,
+    )
+    result = create_result(df, predicted_days)
 
-    save_result(
-        result,
-        days_model_info,
-    )
-
-    show_predictions(
-        result
-    )
+    save_result(result, days_model_info)
+    show_predictions(result)
 
 
 if __name__ == "__main__":
