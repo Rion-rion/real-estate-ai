@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -14,11 +14,24 @@ from predict import (
 )
 
 
+# =========================================================
+# 基本設定
+# =========================================================
+
 ROOT = Path(__file__).resolve().parent
 
 MODEL_FILE = ROOT / "models" / "price_model.cbm"
 TRAINING_FILE = ROOT / "data" / "processed" / "price_training.csv"
 REFERENCE_FILE = ROOT / "data" / "reference" / "station_reference.csv"
+
+
+st.set_page_config(
+    page_title="不動産価格査定システム",
+    page_icon="🏢",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 
 COLUMN_ALIASES = {
     "物件ID": "property_id",
@@ -35,6 +48,7 @@ COLUMN_ALIASES = {
     "売出価格": "asking_price",
 }
 
+
 REQUIRED_COLUMNS = [
     "city",
     "district_name",
@@ -44,19 +58,24 @@ REQUIRED_COLUMNS = [
     "asking_price",
 ]
 
-TEXT_OPTIONAL_COLUMNS = [
-    "station_name",
-    "station_line",
-    "structure",
-    "city_planning",
-]
 
-NUMERIC_OPTIONAL_COLUMNS = [
-    "station_latitude",
-    "station_longitude",
-]
+DISPLAY_NAMES = {
+    "property_id": "物件ID",
+    "city": "市区町村",
+    "district_name": "地区",
+    "station_name": "最寄駅",
+    "station_line": "路線",
+    "area_m2": "専有面積㎡",
+    "floor_plan": "間取り",
+    "building_age": "築年数",
+    "structure": "構造",
+    "city_planning": "用途地域",
+    "asking_price": "売出価格",
+}
+
 
 DISPLAY_COLUMNS = [
+    "査定日時",
     "案件名",
     "担当者",
     "property_id",
@@ -78,27 +97,10 @@ DISPLAY_COLUMNS = [
     "価格評価",
 ]
 
-DISPLAY_NAMES = {
-    "property_id": "物件ID",
-    "city": "市区町村",
-    "district_name": "地区",
-    "station_name": "最寄駅",
-    "station_line": "路線",
-    "area_m2": "専有面積㎡",
-    "floor_plan": "間取り",
-    "building_age": "築年数",
-    "structure": "構造",
-    "city_planning": "用途地域",
-    "asking_price": "売出価格",
-}
 
-st.set_page_config(
-    page_title="不動産価格査定システム",
-    page_icon="🏢",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
+# =========================================================
+# 共通
+# =========================================================
 
 def current_quarter():
     return (date.today().month - 1) // 3 + 1
@@ -120,14 +122,17 @@ def clean_text(series):
 
 
 def clean_station(series):
-    return clean_text(series).str.replace(
-        r"駅$",
-        "",
-        regex=True,
+    return (
+        clean_text(series)
+        .str.replace(
+            r"駅$",
+            "",
+            regex=True,
+        )
     )
 
 
-def format_money(value, unit):
+def format_money(value, unit="万円"):
     if pd.isna(value):
         return "-"
 
@@ -138,6 +143,17 @@ def format_money(value, unit):
 
     return f"{value:,.0f}円"
 
+
+def format_percent(value):
+    if pd.isna(value):
+        return "-"
+
+    return f"{float(value):+.2f}%"
+
+
+# =========================================================
+# テーマ
+# =========================================================
 
 def apply_theme(theme):
     dark = theme == "ダーク"
@@ -155,13 +171,14 @@ def apply_theme(theme):
     st.markdown(
         f"""
         <style>
+
         .stApp {{
-            background: {colors["background"]};
+            background-color: {colors["background"]};
             color: {colors["text"]};
         }}
 
         [data-testid="stSidebar"] {{
-            background: {colors["sidebar"]};
+            background-color: {colors["sidebar"]};
             border-right: 1px solid {colors["border"]};
         }}
 
@@ -169,72 +186,86 @@ def apply_theme(theme):
             color: {colors["text"]};
         }}
 
-        h1, h2, h3, p, label {{
+        h1, h2, h3, h4, p, label {{
             color: {colors["text"]};
         }}
 
-        [data-testid="stForm"],
         [data-testid="stMetric"] {{
-            background: {colors["panel"]};
+            background-color: {colors["panel"]};
             border: 1px solid {colors["border"]};
             border-radius: 14px;
-            padding: 1rem;
+            padding: 16px;
         }}
 
-        div[data-baseweb="input"] > div,
-        div[data-baseweb="select"] > div {{
-            background: {colors["input"]};
-            border-color: {colors["border"]};
-        }}
-
-        div[data-baseweb="input"] input,
-        div[data-baseweb="select"] span {{
-            color: {colors["text"]} !important;
-        }}
-
-        .app-subtitle {{
-            color: {colors["muted"]};
-            margin-top: -0.7rem;
-            margin-bottom: 1.4rem;
+        [data-testid="stDataFrame"] {{
+            border: 1px solid {colors["border"]};
+            border-radius: 12px;
         }}
 
         .workflow-card {{
             background: {colors["panel"]};
             border: 1px solid {colors["border"]};
             border-radius: 12px;
-            padding: 16px;
+            padding: 14px;
             text-align: center;
         }}
 
         .workflow-step {{
+            font-size: 12px;
             color: {colors["muted"]};
-            font-size: 0.8rem;
         }}
 
         .workflow-title {{
-            color: {colors["text"]};
-            font-size: 1.05rem;
+            font-size: 16px;
             font-weight: 700;
+            color: {colors["text"]};
+        }}
+
+        .app-subtitle {{
+            color: {colors["muted"]};
+            margin-top: -10px;
+            margin-bottom: 20px;
+        }}
+
+        .result-comment {{
+            background: {colors["panel"]};
+            border: 1px solid {colors["border"]};
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 8px;
+            margin-bottom: 15px;
         }}
 
         [data-testid="stToolbar"] {{
             display: none;
         }}
 
-        #MainMenu,
+        #MainMenu {{
+            visibility: hidden;
+        }}
+
         footer {{
             visibility: hidden;
         }}
+
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
+# =========================================================
+# モデル
+# =========================================================
+
 @st.cache_resource
 def load_model():
     return load_model_info()
 
+
+# =========================================================
+# 駅参照データ
+# =========================================================
 
 def create_station_reference():
     if not TRAINING_FILE.exists():
@@ -261,9 +292,16 @@ def create_station_reference():
     df["city"] = clean_text(df["city"])
     df["district_name"] = clean_text(df["district_name"])
     df["station_name"] = clean_station(df["station_name"])
-    df["station_line"] = clean_text(df["station_line"]).fillna("不明")
 
-    for column in ["station_latitude", "station_longitude"]:
+    df["station_line"] = (
+        clean_text(df["station_line"])
+        .fillna("不明")
+    )
+
+    for column in [
+        "station_latitude",
+        "station_longitude",
+    ]:
         df[column] = pd.to_numeric(
             df[column],
             errors="coerce",
@@ -290,9 +328,18 @@ def create_station_reference():
             dropna=False,
         )
         .agg(
-            station_latitude=("station_latitude", "median"),
-            station_longitude=("station_longitude", "median"),
-            count=("station_name", "size"),
+            station_latitude=(
+                "station_latitude",
+                "median",
+            ),
+            station_longitude=(
+                "station_longitude",
+                "median",
+            ),
+            count=(
+                "station_name",
+                "size",
+            ),
         )
         .reset_index()
     )
@@ -318,43 +365,67 @@ def load_station_reference():
             REFERENCE_FILE,
             low_memory=False,
         )
+
     else:
         df = create_station_reference()
 
     df["city"] = clean_text(df["city"])
     df["district_name"] = clean_text(df["district_name"])
     df["station_name"] = clean_station(df["station_name"])
-    df["station_line"] = clean_text(df["station_line"]).fillna("不明")
+
+    df["station_line"] = (
+        clean_text(df["station_line"])
+        .fillna("不明")
+    )
 
     return df
 
 
 @st.cache_data
 def load_station_maps():
-    reference = load_station_reference().sort_values(
-        "count",
-        ascending=False,
+    reference = (
+        load_station_reference()
+        .sort_values(
+            "count",
+            ascending=False,
+        )
     )
 
-    district_best = reference.drop_duplicates(
-        ["city", "district_name"]
+    district_best = (
+        reference
+        .drop_duplicates(
+            [
+                "city",
+                "district_name",
+            ]
+        )
     )
 
-    detail_best = reference.drop_duplicates(
-        [
-            "city",
-            "district_name",
-            "station_name",
-        ]
+    detail_best = (
+        reference
+        .drop_duplicates(
+            [
+                "city",
+                "district_name",
+                "station_name",
+            ]
+        )
     )
 
-    station_best = reference.drop_duplicates(
-        "station_name"
+    station_best = (
+        reference
+        .drop_duplicates(
+            "station_name"
+        )
     )
 
     district_map = {
-        (str(row.city), str(row.district_name)): str(row.station_name)
-        for row in district_best.itertuples()
+        (
+            str(row.city),
+            str(row.district_name),
+        ): str(row.station_name)
+        for row
+        in district_best.itertuples()
     }
 
     detail_map = {
@@ -367,7 +438,8 @@ def load_station_maps():
             "station_latitude": float(row.station_latitude),
             "station_longitude": float(row.station_longitude),
         }
-        for row in detail_best.itertuples()
+        for row
+        in detail_best.itertuples()
     }
 
     station_map = {
@@ -376,19 +448,30 @@ def load_station_maps():
             "station_latitude": float(row.station_latitude),
             "station_longitude": float(row.station_longitude),
         }
-        for row in station_best.itertuples()
+        for row
+        in station_best.itertuples()
     }
 
-    return district_map, detail_map, station_map
+    return (
+        district_map,
+        detail_map,
+        station_map,
+    )
 
 
 def fill_station_features(df):
     df = df.copy()
 
-    district_map, detail_map, station_map = load_station_maps()
+    (
+        district_map,
+        detail_map,
+        station_map,
+    ) = load_station_maps()
 
     df["city"] = clean_text(df["city"])
-    df["district_name"] = clean_text(df["district_name"])
+    df["district_name"] = clean_text(
+        df["district_name"]
+    )
 
     if "station_name" not in df.columns:
         df["station_name"] = pd.NA
@@ -396,10 +479,18 @@ def fill_station_features(df):
     if "station_line" not in df.columns:
         df["station_line"] = pd.NA
 
-    df["station_name"] = clean_station(df["station_name"])
-    df["station_line"] = clean_text(df["station_line"])
+    df["station_name"] = clean_station(
+        df["station_name"]
+    )
 
-    for column in NUMERIC_OPTIONAL_COLUMNS:
+    df["station_line"] = clean_text(
+        df["station_line"]
+    )
+
+    for column in [
+        "station_latitude",
+        "station_longitude",
+    ]:
         if column not in df.columns:
             df[column] = np.nan
 
@@ -412,34 +503,55 @@ def fill_station_features(df):
 
     for index, row in df.iterrows():
         city = str(row["city"])
-        district = str(row["district_name"])
-        station = row["station_name"]
+        district = str(
+            row["district_name"]
+        )
+
+        station = row[
+            "station_name"
+        ]
 
         if pd.isna(station):
-            station = district_map.get(
-                (city, district)
+            station = (
+                district_map.get(
+                    (
+                        city,
+                        district,
+                    )
+                )
             )
 
             if station is None:
                 errors.append(
-                    f"{index + 1}行目: 最寄駅を補完できません。"
+                    f"{index + 1}行目: "
+                    "最寄駅を補完できません。"
                 )
                 continue
 
-            df.at[index, "station_name"] = station
+            df.at[
+                index,
+                "station_name",
+            ] = station
 
         station = str(station)
 
         info = detail_map.get(
-            (city, district, station)
+            (
+                city,
+                district,
+                station,
+            )
         )
 
         if info is None:
-            info = station_map.get(station)
+            info = station_map.get(
+                station
+            )
 
         if info is None:
             errors.append(
-                f"{index + 1}行目: {station}駅の情報がありません。"
+                f"{index + 1}行目: "
+                f"{station}駅の情報がありません。"
             )
             continue
 
@@ -448,8 +560,13 @@ def fill_station_features(df):
             "station_latitude",
             "station_longitude",
         ]:
-            if pd.isna(row[column]):
-                df.at[index, column] = info[column]
+            if pd.isna(
+                row[column]
+            ):
+                df.at[
+                    index,
+                    column,
+                ] = info[column]
 
     if errors:
         raise ValueError(
@@ -459,18 +576,26 @@ def fill_station_features(df):
     return df
 
 
+# =========================================================
+# 入力データ整形
+# =========================================================
+
 def normalize_input(
     df,
     features,
     categories,
 ):
-    df = df.copy().rename(
-        columns=COLUMN_ALIASES
+    df = (
+        df.copy()
+        .rename(
+            columns=COLUMN_ALIASES
+        )
     )
 
     missing = [
         column
-        for column in REQUIRED_COLUMNS
+        for column
+        in REQUIRED_COLUMNS
         if column not in df.columns
     ]
 
@@ -483,33 +608,60 @@ def normalize_input(
     if "property_id" not in df.columns:
         df["property_id"] = [
             f"WEB{i + 1:04d}"
-            for i in range(len(df))
+            for i in range(
+                len(df)
+            )
         ]
 
-    for column in TEXT_OPTIONAL_COLUMNS:
+    for column in [
+        "station_name",
+        "station_line",
+        "structure",
+        "city_planning",
+    ]:
         if column not in df.columns:
             df[column] = pd.NA
 
-    for column in NUMERIC_OPTIONAL_COLUMNS:
+    for column in [
+        "station_latitude",
+        "station_longitude",
+    ]:
         if column not in df.columns:
             df[column] = np.nan
 
-    df["transaction_year"] = date.today().year
-    df["transaction_quarter"] = current_quarter()
-
-    df["asking_price"] = pd.to_numeric(
-        df["asking_price"],
-        errors="coerce",
+    df["transaction_year"] = (
+        date.today().year
     )
+
+    df["transaction_quarter"] = (
+        current_quarter()
+    )
+
+    for column in [
+        "area_m2",
+        "building_age",
+        "asking_price",
+    ]:
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce",
+        )
 
     if df["asking_price"].isna().any():
         raise ValueError(
             "売出価格に未入力または不正な値があります。"
         )
 
-    if (df["asking_price"] <= 0).any():
+    if (
+        df["asking_price"] <= 0
+    ).any():
         raise ValueError(
             "売出価格は0円より大きくしてください。"
+        )
+
+    if df["area_m2"].isna().any():
+        raise ValueError(
+            "専有面積を正しく入力してください。"
         )
 
     for column in features:
@@ -525,8 +677,17 @@ def normalize_input(
     return df
 
 
+# =========================================================
+# 査定
+# =========================================================
+
 def assess(df):
-    model, _, features, categories = load_model()
+    (
+        model,
+        _,
+        features,
+        categories,
+    ) = load_model()
 
     df = normalize_input(
         df,
@@ -534,7 +695,9 @@ def assess(df):
         categories,
     )
 
-    df = fill_station_features(df)
+    df = fill_station_features(
+        df
+    )
 
     prepared = prepare_input_data(
         df,
@@ -542,7 +705,10 @@ def assess(df):
         categories,
     )
 
-    unit_price, price = predict_prices(
+    (
+        unit_price,
+        price,
+    ) = predict_prices(
         model,
         prepared,
         features,
@@ -550,13 +716,26 @@ def assess(df):
 
     result = df.copy()
 
-    result["推定㎡単価"] = np.round(
-        unit_price
-    ).astype(int)
+    result["査定日時"] = (
+        datetime.now()
+        .strftime(
+            "%Y/%m/%d %H:%M"
+        )
+    )
 
-    result["推定成約価格"] = np.round(
-        price
-    ).astype(int)
+    result["推定㎡単価"] = (
+        np.round(
+            unit_price
+        )
+        .astype(int)
+    )
+
+    result["推定成約価格"] = (
+        np.round(
+            price
+        )
+        .astype(int)
+    )
 
     result["売出㎡単価"] = (
         result["asking_price"]
@@ -584,19 +763,99 @@ def assess(df):
     return result
 
 
+# =========================================================
+# 営業向け表示
+# =========================================================
+
 def sales_view(result):
     columns = [
         column
-        for column in DISPLAY_COLUMNS
+        for column
+        in DISPLAY_COLUMNS
         if column in result.columns
     ]
 
-    return result[
-        columns
-    ].rename(
-        columns=DISPLAY_NAMES
+    return (
+        result[columns]
+        .rename(
+            columns=DISPLAY_NAMES
+        )
     )
 
+
+def sales_comment(row):
+    gap = row[
+        "価格乖離率(%)"
+    ]
+
+    if pd.isna(gap):
+        return (
+            "売出価格との比較情報を"
+            "算出できませんでした。"
+        )
+
+    if gap > 20:
+        return (
+            "売出価格は推定成約価格を"
+            "20%以上上回っています。"
+            "価格設定や販売状況を"
+            "再確認する際の参考にしてください。"
+        )
+
+    if gap > 10:
+        return (
+            "売出価格は推定成約価格を"
+            "10%以上上回っています。"
+            "反響状況とあわせて価格設定を"
+            "確認する余地があります。"
+        )
+
+    if gap >= -10:
+        return (
+            "売出価格は推定成約価格の"
+            "±10%以内に収まっています。"
+            "現在の価格帯を検討する際の"
+            "参考にできます。"
+        )
+
+    return (
+        "売出価格は推定成約価格を"
+        "10%以上下回っています。"
+        "価格設定に引き上げ余地がないか"
+        "確認する際の参考にしてください。"
+    )
+
+
+def result_summary(
+    row,
+    unit,
+):
+    case_name = (
+        row.get(
+            "案件名",
+            "",
+        )
+        or "物件"
+    )
+
+    return (
+        f"{case_name}\n"
+        f"推定成約価格："
+        f"{format_money(row['推定成約価格'], unit)}\n"
+        f"売出価格："
+        f"{format_money(row['asking_price'], unit)}\n"
+        f"価格差："
+        f"{format_money(row['売出価格との差額'], unit)}\n"
+        f"価格乖離率："
+        f"{format_percent(row['価格乖離率(%)'])}\n"
+        f"価格評価："
+        f"{row['価格評価']}"
+    )
+
+
+# =========================================================
+# Excel
+# =========================================================
 
 def excel_bytes(
     df,
@@ -608,11 +867,47 @@ def excel_bytes(
         buffer,
         engine="openpyxl",
     ) as writer:
+
         df.to_excel(
             writer,
             index=False,
             sheet_name=sheet_name,
         )
+
+        worksheet = writer[
+            sheet_name
+        ]
+
+        worksheet.freeze_panes = "A2"
+
+        for column_cells in (
+            worksheet.columns
+        ):
+            max_length = 0
+
+            column_letter = (
+                column_cells[0]
+                .column_letter
+            )
+
+            for cell in column_cells:
+                value = (
+                    ""
+                    if cell.value is None
+                    else str(cell.value)
+                )
+
+                max_length = max(
+                    max_length,
+                    len(value),
+                )
+
+            worksheet.column_dimensions[
+                column_letter
+            ].width = min(
+                max_length + 3,
+                30,
+            )
 
     return buffer.getvalue()
 
@@ -621,18 +916,30 @@ def template_excel():
     template = pd.DataFrame(
         [
             {
-                "案件名": "北千住マンション",
-                "担当者": "山田",
-                "物件ID": "A001",
-                "市区町村": "足立区",
-                "地区": "千住",
-                "最寄駅": "北千住",
-                "専有面積㎡": 65.2,
-                "間取り": "3LDK",
-                "築年数": 12,
-                "構造": "RC",
-                "用途地域": "商業地域",
-                "売出価格": 75_000_000,
+                "案件名":
+                    "北千住マンション",
+                "担当者":
+                    "山田",
+                "物件ID":
+                    "A001",
+                "市区町村":
+                    "足立区",
+                "地区":
+                    "千住",
+                "最寄駅":
+                    "北千住",
+                "専有面積㎡":
+                    65.2,
+                "間取り":
+                    "3LDK",
+                "築年数":
+                    12,
+                "構造":
+                    "RC",
+                "用途地域":
+                    "商業地域",
+                "売出価格":
+                    75_000_000,
             }
         ]
     )
@@ -642,6 +949,10 @@ def template_excel():
         "査定入力",
     )
 
+
+# =========================================================
+# グラフ
+# =========================================================
 
 def result_label(result):
     if "案件名" in result.columns:
@@ -662,7 +973,9 @@ def show_charts(
     result,
     unit,
 ):
-    label = result_label(result)
+    label = result_label(
+        result
+    )
 
     divisor = (
         10_000
@@ -670,21 +983,33 @@ def show_charts(
         else 1
     )
 
-    price = result[
-        [
-            label,
-            "推定成約価格",
-            "asking_price",
+    price_chart = (
+        result[
+            [
+                label,
+                "推定成約価格",
+                "asking_price",
+            ]
         ]
-    ].copy()
+        .copy()
+    )
 
-    price["推定成約価格"] /= divisor
-    price["asking_price"] /= divisor
+    price_chart[
+        "推定成約価格"
+    ] /= divisor
 
-    price = price.rename(
-        columns={
-            "asking_price": "売出価格",
-        }
+    price_chart[
+        "asking_price"
+    ] /= divisor
+
+    price_chart = (
+        price_chart
+        .rename(
+            columns={
+                "asking_price":
+                    "売出価格",
+            }
+        )
     )
 
     st.subheader(
@@ -692,276 +1017,278 @@ def show_charts(
     )
 
     st.bar_chart(
-        price.set_index(label)
+        price_chart
+        .set_index(label)
     )
 
-    unit_price = result[
-        [
-            label,
-            "推定㎡単価",
-            "売出㎡単価",
+    unit_chart = (
+        result[
+            [
+                label,
+                "推定㎡単価",
+                "売出㎡単価",
+            ]
         ]
-    ].copy()
+        .copy()
+    )
 
     st.subheader(
-        "㎡単価比較（円/㎡）"
+        "㎡単価比較（円 / ㎡）"
     )
 
     st.bar_chart(
-        unit_price.set_index(label)
+        unit_chart
+        .set_index(label)
     )
 
     if len(result) > 1:
-        gap = result[
-            [
-                label,
-                "価格乖離率(%)",
+        gap_chart = (
+            result[
+                [
+                    label,
+                    "価格乖離率(%)",
+                ]
             ]
-        ]
+            .copy()
+        )
 
         st.subheader(
             "価格乖離率（%）"
         )
 
         st.bar_chart(
-            gap.set_index(label)
+            gap_chart
+            .set_index(label)
         )
 
 
-def show_result(
-    result,
-    unit,
-    show_graph,
-):
-    first = result.iloc[0]
+# =========================================================
+# 査定履歴
+# =========================================================
 
-    st.subheader(
-        "査定結果"
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    c1.metric(
-        "推定成約価格",
-        format_money(
-            first["推定成約価格"],
-            unit,
-        ),
-    )
-
-    c2.metric(
-        "売出価格",
-        format_money(
-            first["asking_price"],
-            unit,
-        ),
-    )
-
-    gap = first["価格乖離率(%)"]
-
-    c3.metric(
-        "価格乖離率",
-        (
-            f"{gap:+.2f}%"
-            if pd.notna(gap)
-            else "-"
-        ),
-    )
-
-    c4.metric(
-        "価格評価",
-        first["価格評価"] or "-",
-    )
-
-    if show_graph:
-        show_charts(
-            result,
-            unit,
-        )
-
-    st.subheader(
-        "査定結果一覧"
-    )
-
+def add_history(result):
     output = sales_view(
         result
     )
 
-    st.dataframe(
-        output,
-        hide_index=True,
-        use_container_width=True,
-    )
+    if "history" not in st.session_state:
+        st.session_state[
+            "history"
+        ] = output.copy()
 
-    st.download_button(
-        "査定結果をExcelで出力",
-        data=excel_bytes(
-            output,
-            "査定結果",
-        ),
-        file_name="査定結果.xlsx",
-        mime=(
-            "application/"
-            "vnd.openxmlformats-officedocument."
-            "spreadsheetml.sheet"
-        ),
-        type="primary",
-        use_container_width=True,
-    )
-
-
-def workflow():
-    items = [
-        ("STEP 1", "物件情報を入力"),
-        ("STEP 2", "査定する"),
-        ("STEP 3", "Excelで出力"),
-    ]
-
-    for column, item in zip(
-        st.columns(3),
-        items,
-    ):
-        step, title = item
-
-        with column:
-            st.markdown(
-                f"""
-                <div class="workflow-card">
-                    <div class="workflow-step">{step}</div>
-                    <div class="workflow-title">{title}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-
-def manual_input():
-    with st.form(
-        "assessment"
-    ):
-        st.subheader(
-            "物件情報"
-        )
-
-        a, b = st.columns(2)
-
-        case = a.text_input(
-            "案件名",
-            placeholder="例：北千住マンション",
-        )
-
-        staff = b.text_input(
-            "担当者",
-            placeholder="例：山田",
-        )
-
-        a, b, c = st.columns(3)
-
-        city = a.text_input(
-            "市区町村",
-            "足立区",
-        )
-
-        district = b.text_input(
-            "地区",
-            "千住",
-        )
-
-        station = c.text_input(
-            "最寄駅",
-            "北千住",
-            help=(
-                "空欄の場合は地区情報から"
-                "代表駅を補完します。"
-            ),
-        )
-
-        a, b, c = st.columns(3)
-
-        area = a.number_input(
-            "専有面積（㎡）",
-            min_value=1.0,
-            value=65.2,
-            step=0.1,
-        )
-
-        plan = b.text_input(
-            "間取り",
-            "3LDK",
-        )
-
-        age = c.number_input(
-            "築年数",
-            min_value=0,
-            value=12,
-            step=1,
-        )
-
-        a, b = st.columns(2)
-
-        structure = a.selectbox(
-            "構造",
+    else:
+        st.session_state[
+            "history"
+        ] = pd.concat(
             [
-                "RC",
-                "SRC",
-                "S",
-                "その他",
-                "不明",
+                output,
+                st.session_state[
+                    "history"
+                ],
             ],
+            ignore_index=True,
         )
 
-        planning = b.text_input(
-            "用途地域",
-            "商業地域",
-        )
+    st.session_state[
+        "history"
+    ] = (
+        st.session_state[
+            "history"
+        ]
+        .head(50)
+    )
 
-        asking = st.number_input(
-            "売出価格（円）",
-            min_value=1_000_000,
-            value=75_000_000,
-            step=1_000_000,
-        )
 
-        submitted = (
-            st.form_submit_button(
-                "査定する",
-                type="primary",
-                use_container_width=True,
-            )
-        )
+# =========================================================
+# 1件入力
+# =========================================================
 
-    if not submitted:
-        return
+def single_input():
+    st.subheader(
+        "物件情報"
+    )
 
-    df = pd.DataFrame(
+    st.caption(
+        "1行に物件情報を入力し、"
+        "査定ボタンを押してください。"
+    )
+
+    input_df = pd.DataFrame(
         [
             {
-                "案件名": case,
-                "担当者": staff,
-                "city": city,
-                "district_name": district,
-                "station_name": (
-                    station
-                    if station.strip()
-                    else pd.NA
-                ),
-                "area_m2": area,
-                "floor_plan": plan,
-                "building_age": age,
-                "structure": structure,
-                "city_planning": planning,
-                "asking_price": asking,
+                "案件名":
+                    "",
+                "担当者":
+                    "",
+                "city":
+                    "足立区",
+                "district_name":
+                    "千住",
+                "station_name":
+                    "北千住",
+                "area_m2":
+                    65.2,
+                "floor_plan":
+                    "3LDK",
+                "building_age":
+                    12,
+                "structure":
+                    "RC",
+                "city_planning":
+                    "商業地域",
+                "asking_price":
+                    75_000_000,
             }
         ]
     )
 
-    with st.spinner(
-        "査定しています..."
-    ):
-        st.session_state["result"] = (
-            assess(df)
+    edited_df = st.data_editor(
+        input_df,
+        hide_index=True,
+        use_container_width=True,
+        num_rows="fixed",
+        row_height=42,
+        key="single_property_editor",
+        column_config={
+            "案件名":
+                st.column_config.TextColumn(
+                    "案件名",
+                    width="medium",
+                ),
+
+            "担当者":
+                st.column_config.TextColumn(
+                    "担当者",
+                    width="small",
+                ),
+
+            "city":
+                st.column_config.TextColumn(
+                    "市区町村",
+                    width="small",
+                    required=True,
+                ),
+
+            "district_name":
+                st.column_config.TextColumn(
+                    "地区",
+                    width="small",
+                    required=True,
+                ),
+
+            "station_name":
+                st.column_config.TextColumn(
+                    "最寄駅",
+                    width="small",
+                    help=(
+                        "空欄の場合は"
+                        "地区から代表駅を補完します。"
+                    ),
+                ),
+
+            "area_m2":
+                st.column_config.NumberColumn(
+                    "専有面積㎡",
+                    min_value=1.0,
+                    step=0.1,
+                    format="%.1f",
+                    width="small",
+                    required=True,
+                ),
+
+            "floor_plan":
+                st.column_config.TextColumn(
+                    "間取り",
+                    width="small",
+                    required=True,
+                ),
+
+            "building_age":
+                st.column_config.NumberColumn(
+                    "築年数",
+                    min_value=0,
+                    step=1,
+                    format="%d",
+                    width="small",
+                    required=True,
+                ),
+
+            "structure":
+                st.column_config.SelectboxColumn(
+                    "構造",
+                    options=[
+                        "RC",
+                        "SRC",
+                        "S",
+                        "その他",
+                        "不明",
+                    ],
+                    width="small",
+                ),
+
+            "city_planning":
+                st.column_config.TextColumn(
+                    "用途地域",
+                    width="medium",
+                ),
+
+            "asking_price":
+                st.column_config.NumberColumn(
+                    "売出価格（円）",
+                    min_value=1_000_000,
+                    step=1_000_000,
+                    format="%d",
+                    width="medium",
+                    required=True,
+                ),
+        },
+    )
+
+    col1, col2 = (
+        st.columns(
+            [4, 1]
+        )
+    )
+
+    with col1:
+        run = st.button(
+            "査定する",
+            type="primary",
+            use_container_width=True,
         )
 
+    with col2:
+        clear = st.button(
+            "結果をクリア",
+            use_container_width=True,
+        )
+
+    if clear:
+        st.session_state.pop(
+            "result",
+            None,
+        )
+
+    if run:
+        with st.spinner(
+            "査定しています..."
+        ):
+            result = assess(
+                edited_df
+            )
+
+            st.session_state[
+                "result"
+            ] = result
+
+            add_history(
+                result
+            )
+
+
+# =========================================================
+# 一括査定
+# =========================================================
 
 def batch_input():
     st.subheader(
@@ -969,8 +1296,7 @@ def batch_input():
     )
 
     st.caption(
-        "テンプレートへ複数物件を入力して"
-        "一括査定できます。"
+        "複数物件をまとめて査定できます。"
     )
 
     st.download_button(
@@ -995,15 +1321,21 @@ def batch_input():
     if file is None:
         return
 
-    suffix = Path(
-        file.name
-    ).suffix.lower()
+    suffix = (
+        Path(file.name)
+        .suffix
+        .lower()
+    )
 
     if suffix == ".csv":
-        df = pd.read_csv(file)
+        df = pd.read_csv(
+            file
+        )
 
     else:
-        excel = pd.ExcelFile(file)
+        excel = pd.ExcelFile(
+            file
+        )
 
         sheet = (
             "査定入力"
@@ -1017,7 +1349,7 @@ def batch_input():
             sheet_name=sheet,
         )
 
-    st.caption(
+    st.success(
         f"{len(df):,}件を読み込みました。"
     )
 
@@ -1035,19 +1367,291 @@ def batch_input():
         with st.spinner(
             "査定しています..."
         ):
-            st.session_state["result"] = (
-                assess(df)
+            result = assess(
+                df
+            )
+
+            st.session_state[
+                "result"
+            ] = result
+
+            add_history(
+                result
             )
 
 
+# =========================================================
+# 結果表示
+# =========================================================
+
+def show_result(
+    result,
+    unit,
+    show_graph,
+):
+    first = result.iloc[0]
+
+    st.divider()
+
+    st.header(
+        "査定結果"
+    )
+
+    c1, c2, c3, c4 = (
+        st.columns(4)
+    )
+
+    c1.metric(
+        "推定成約価格",
+        format_money(
+            first[
+                "推定成約価格"
+            ],
+            unit,
+        ),
+    )
+
+    c2.metric(
+        "売出価格",
+        format_money(
+            first[
+                "asking_price"
+            ],
+            unit,
+        ),
+    )
+
+    c3.metric(
+        "価格乖離率",
+        format_percent(
+            first[
+                "価格乖離率(%)"
+            ]
+        ),
+    )
+
+    c4.metric(
+        "価格評価",
+        first[
+            "価格評価"
+        ]
+        or "-",
+    )
+
+    st.subheader(
+        "参考コメント"
+    )
+
+    st.info(
+        sales_comment(
+            first
+        )
+    )
+
+    difference = first[
+        "売出価格との差額"
+    ]
+
+    if pd.notna(difference):
+        if difference > 0:
+            st.caption(
+                "売出価格は推定成約価格より "
+                f"{format_money(abs(difference), unit)} "
+                "高く設定されています。"
+            )
+
+        elif difference < 0:
+            st.caption(
+                "売出価格は推定成約価格より "
+                f"{format_money(abs(difference), unit)} "
+                "低く設定されています。"
+            )
+
+        else:
+            st.caption(
+                "売出価格と推定成約価格は同額です。"
+            )
+
+    if show_graph:
+        show_charts(
+            result,
+            unit,
+        )
+
+    st.subheader(
+        "査定結果一覧"
+    )
+
+    output = sales_view(
+        result
+    )
+
+    st.dataframe(
+        output,
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    left, right = (
+        st.columns(2)
+    )
+
+    with left:
+        st.download_button(
+            "査定結果をExcelで出力",
+            data=excel_bytes(
+                output,
+                "査定結果",
+            ),
+            file_name="査定結果.xlsx",
+            mime=(
+                "application/"
+                "vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            type="primary",
+            use_container_width=True,
+        )
+
+    with right:
+        if len(result) == 1:
+            with st.popover(
+                "説明用サマリー"
+            ):
+                st.text_area(
+                    "コピー用",
+                    value=result_summary(
+                        first,
+                        unit,
+                    ),
+                    height=160,
+                )
+
+
+# =========================================================
+# 履歴
+# =========================================================
+
+def history_page():
+    st.subheader(
+        "この画面の査定履歴"
+    )
+
+    st.caption(
+        "直近50件まで表示します。"
+        "ブラウザのセッション終了後は保持されません。"
+    )
+
+    if (
+        "history"
+        not in st.session_state
+        or st.session_state[
+            "history"
+        ].empty
+    ):
+        st.info(
+            "まだ査定履歴はありません。"
+        )
+        return
+
+    history = st.session_state[
+        "history"
+    ]
+
+    st.dataframe(
+        history,
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    c1, c2 = (
+        st.columns(2)
+    )
+
+    with c1:
+        st.download_button(
+            "履歴をExcelで出力",
+            data=excel_bytes(
+                history,
+                "査定履歴",
+            ),
+            file_name="査定履歴.xlsx",
+            mime=(
+                "application/"
+                "vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
+
+    with c2:
+        if st.button(
+            "履歴をクリア",
+            use_container_width=True,
+        ):
+            st.session_state.pop(
+                "history",
+                None,
+            )
+
+            st.rerun()
+
+
+# =========================================================
+# 上部案内
+# =========================================================
+
+def workflow():
+    items = [
+        (
+            "STEP 1",
+            "物件情報を入力",
+        ),
+        (
+            "STEP 2",
+            "査定する",
+        ),
+        (
+            "STEP 3",
+            "結果を確認・出力",
+        ),
+    ]
+
+    for column, item in zip(
+        st.columns(3),
+        items,
+    ):
+        step, title = item
+
+        with column:
+            st.markdown(
+                f"""
+                <div class="workflow-card">
+                    <div class="workflow-step">
+                        {step}
+                    </div>
+                    <div class="workflow-title">
+                        {title}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+# =========================================================
+# サイドバー
+# =========================================================
+
 def sidebar_settings():
     with st.sidebar:
+
         st.header(
-            "設定"
+            "表示設定"
         )
 
         theme = st.radio(
-            "表示テーマ",
+            "テーマ",
             [
                 "ライト",
                 "ダーク",
@@ -1058,8 +1662,8 @@ def sidebar_settings():
         unit = st.radio(
             "金額表示",
             [
-                "円",
                 "万円",
+                "円",
             ],
             horizontal=True,
         )
@@ -1089,9 +1693,15 @@ def sidebar_settings():
                 "駅情報：利用可能"
             )
         else:
-            st.info(
-                "駅情報：準備中"
+            st.warning(
+                "駅情報：未配置"
             )
+
+        st.divider()
+
+        st.caption(
+            "東京都中古マンション向け"
+        )
 
     return (
         theme,
@@ -1100,12 +1710,21 @@ def sidebar_settings():
     )
 
 
-def main():
-    theme, unit, show_graph = (
-        sidebar_settings()
-    )
+# =========================================================
+# メイン
+# =========================================================
 
-    apply_theme(theme)
+def main():
+
+    (
+        theme,
+        unit,
+        show_graph,
+    ) = sidebar_settings()
+
+    apply_theme(
+        theme
+    )
 
     st.title(
         "不動産価格査定システム"
@@ -1114,8 +1733,8 @@ def main():
     st.markdown(
         """
         <div class="app-subtitle">
-            東京都中古マンション
-            査定・売出価格検討支援
+        東京都中古マンション
+        査定・売出価格検討支援
         </div>
         """,
         unsafe_allow_html=True,
@@ -1125,30 +1744,42 @@ def main():
 
     st.write("")
 
-    manual, batch = st.tabs(
+    (
+        single_tab,
+        batch_tab,
+        history_tab,
+    ) = st.tabs(
         [
             "1件査定",
             "Excel一括査定",
+            "査定履歴",
         ]
     )
 
     try:
-        with manual:
-            manual_input()
+        with single_tab:
+            single_input()
 
-        with batch:
+        with batch_tab:
             batch_input()
 
-        if "result" in st.session_state:
-            st.divider()
+        with history_tab:
+            history_page()
 
+        if (
+            "result"
+            in st.session_state
+        ):
             show_result(
-                st.session_state["result"],
+                st.session_state[
+                    "result"
+                ],
                 unit,
                 show_graph,
             )
 
     except Exception as error:
+
         st.error(
             "処理できませんでした。"
         )
