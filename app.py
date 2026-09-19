@@ -742,27 +742,47 @@ def show_charts(result: pd.DataFrame, unit: str) -> None:
 
         price_compare = pd.DataFrame(
             {
+                "項目": ["売出価格", "推定成約価格"],
                 "金額": [
                     float(row["asking_price"]) / divisor,
                     float(row["推定成約価格"]) / divisor,
-                ]
-            },
-            index=["売出価格", "推定成約価格"],
+                ],
+            }
         )
+
         st.subheader(f"価格比較（{unit}）")
-        st.bar_chart(price_compare, height=320)
+        st.bar_chart(
+            price_compare,
+            x="項目",
+            y="金額",
+            x_label="",
+            y_label=f"金額（{unit}）",
+            horizontal=True,
+            sort=False,
+            height=230,
+        )
 
         unit_price_compare = pd.DataFrame(
             {
-                "円 / ㎡": [
+                "項目": ["売出㎡単価", "推定㎡単価"],
+                "㎡単価": [
                     float(row["売出㎡単価"]),
                     float(row["推定㎡単価"]),
-                ]
-            },
-            index=["売出㎡単価", "推定㎡単価"],
+                ],
+            }
         )
+
         st.subheader("㎡単価比較（円 / ㎡）")
-        st.bar_chart(unit_price_compare, height=320)
+        st.bar_chart(
+            unit_price_compare,
+            x="項目",
+            y="㎡単価",
+            x_label="",
+            y_label="円 / ㎡",
+            horizontal=True,
+            sort=False,
+            height=230,
+        )
         return
 
     label = result_label(result)
@@ -770,31 +790,43 @@ def show_charts(result: pd.DataFrame, unit: str) -> None:
     price = result[[label, "asking_price", "推定成約価格"]].copy()
     price["売出価格"] = price.pop("asking_price") / divisor
     price["推定成約価格"] = price["推定成約価格"] / divisor
+
     st.subheader(f"価格比較（{unit}）")
     st.bar_chart(
         price,
         x=label,
         y=["売出価格", "推定成約価格"],
+        x_label="",
+        y_label=f"金額（{unit}）",
         stack=False,
+        sort=False,
         height=400,
     )
 
     unit_price = result[[label, "売出㎡単価", "推定㎡単価"]].copy()
+
     st.subheader("㎡単価比較（円 / ㎡）")
     st.bar_chart(
         unit_price,
         x=label,
         y=["売出㎡単価", "推定㎡単価"],
+        x_label="",
+        y_label="円 / ㎡",
         stack=False,
+        sort=False,
         height=400,
     )
 
     gap = result[[label, "価格乖離率(%)"]].copy()
+
     st.subheader("価格乖離率（%）")
     st.bar_chart(
         gap,
         x=label,
         y="価格乖離率(%)",
+        x_label="",
+        y_label="乖離率（%）",
+        sort=False,
         height=340,
     )
 
