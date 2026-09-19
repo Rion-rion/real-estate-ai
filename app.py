@@ -20,10 +20,6 @@ from predict import (
 )
 
 
-# =========================================================
-# 基本設定
-# =========================================================
-
 ROOT = Path(__file__).resolve().parent
 MODEL_FILE = ROOT / "models" / "price_model.cbm"
 TRAINING_FILE = ROOT / "data" / "processed" / "price_training.csv"
@@ -126,10 +122,6 @@ st.set_page_config(
 )
 
 
-# =========================================================
-# 共通ヘルパー
-# =========================================================
-
 def current_quarter() -> int:
     return (date.today().month - 1) // 3 + 1
 
@@ -193,10 +185,6 @@ def generated_property_ids(count: int) -> list[str]:
     return [f"WEB-{stamp}-{i + 1:03d}" for i in range(count)]
 
 
-# =========================================================
-# Secrets / 認証
-# =========================================================
-
 def app_password() -> str:
     try:
         return safe_text(st.secrets.get("APP_PASSWORD", ""))
@@ -234,10 +222,6 @@ def access_gate() -> bool:
 
     return False
 
-
-# =========================================================
-# テーマ
-# =========================================================
 
 def apply_theme(theme: str) -> None:
     dark = theme == "ダーク"
@@ -295,10 +279,6 @@ def apply_theme(theme: str) -> None:
         unsafe_allow_html=True,
     )
 
-
-# =========================================================
-# モデル / 駅参照データ
-# =========================================================
 
 @st.cache_resource(show_spinner=False)
 def load_model():
@@ -477,10 +457,6 @@ def fill_station_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# =========================================================
-# 入力整形 / 査定
-# =========================================================
-
 def normalize_input(df: pd.DataFrame, features: list[str], categories: list[str]) -> pd.DataFrame:
     df = df.copy().rename(columns=COLUMN_ALIASES)
     df.columns = [str(column).strip() for column in df.columns]
@@ -557,10 +533,6 @@ def assess(df: pd.DataFrame) -> pd.DataFrame:
     result["価格評価"] = result["価格乖離率(%)"].apply(evaluate_price_position)
     return result
 
-
-# =========================================================
-# Supabase
-# =========================================================
 
 def database_configured() -> bool:
     url, key = supabase_settings()
@@ -657,10 +629,6 @@ def load_database_history() -> pd.DataFrame:
     return df.drop(columns=[column for column in ["id", "created_at"] if column in df.columns])
 
 
-# =========================================================
-# Excel / ファイル
-# =========================================================
-
 def excel_bytes(df: pd.DataFrame, sheet_name: str) -> bytes:
     """DataFrameをExcel化。pandas 2.xでは writer.sheets からWorksheetを取得する。"""
     buffer = BytesIO()
@@ -726,10 +694,6 @@ def read_uploaded_file(file) -> pd.DataFrame:
     raise ValueError("対応しているファイル形式は .xlsx / .csv です。")
 
 
-# =========================================================
-# 表示用データ / コメント
-# =========================================================
-
 def sales_view(result: pd.DataFrame) -> pd.DataFrame:
     columns = [column for column in DISPLAY_COLUMNS if column in result.columns]
     return result[columns].rename(columns=DISPLAY_NAMES)
@@ -771,28 +735,68 @@ def result_label(result: pd.DataFrame) -> str:
 
 
 def show_charts(result: pd.DataFrame, unit: str) -> None:
-    label = result_label(result)
     divisor = 10_000 if unit == "万円" else 1
 
-    price = result[[label, "推定成約価格", "asking_price"]].copy()
-    price["推定成約価格"] = price["推定成約価格"] / divisor
+    if len(result) == 1:
+        row = result.iloc[0]
+
+        price_compare = pd.DataFrame(
+            {
+                "金額": [
+                    float(row["asking_price"]) / divisor,
+                    float(row["推定成約価格"]) / divisor,
+                ]
+            },
+            index=["売出価格", "推定成約価格"],
+        )
+        st.subheader(f"価格比較（{unit}）")
+        st.bar_chart(price_compare, height=320)
+
+        unit_price_compare = pd.DataFrame(
+            {
+                "円 / ㎡": [
+                    float(row["売出㎡単価"]),
+                    float(row["推定㎡単価"]),
+                ]
+            },
+            index=["売出㎡単価", "推定㎡単価"],
+        )
+        st.subheader("㎡単価比較（円 / ㎡）")
+        st.bar_chart(unit_price_compare, height=320)
+        return
+
+    label = result_label(result)
+
+    price = result[[label, "asking_price", "推定成約価格"]].copy()
     price["売出価格"] = price.pop("asking_price") / divisor
+    price["推定成約価格"] = price["推定成約価格"] / divisor
     st.subheader(f"価格比較（{unit}）")
-    st.bar_chart(price.set_index(label))
+    st.bar_chart(
+        price,
+        x=label,
+        y=["売出価格", "推定成約価格"],
+        stack=False,
+        height=400,
+    )
 
-    unit_price = result[[label, "推定㎡単価", "売出㎡単価"]].copy()
+    unit_price = result[[label, "売出㎡単価", "推定㎡単価"]].copy()
     st.subheader("㎡単価比較（円 / ㎡）")
-    st.bar_chart(unit_price.set_index(label))
+    st.bar_chart(
+        unit_price,
+        x=label,
+        y=["売出㎡単価", "推定㎡単価"],
+        stack=False,
+        height=400,
+    )
 
-    if len(result) > 1:
-        gap = result[[label, "価格乖離率(%)"]].copy()
-        st.subheader("価格乖離率（%）")
-        st.bar_chart(gap.set_index(label))
-
-
-# =========================================================
-# 1件査定（縦1列）
-# =========================================================
+    gap = result[[label, "価格乖離率(%)"]].copy()
+    st.subheader("価格乖離率（%）")
+    st.bar_chart(
+        gap,
+        x=label,
+        y="価格乖離率(%)",
+        height=340,
+    )
 
 def single_input() -> None:
     st.subheader("物件情報")
@@ -873,10 +877,6 @@ def single_input() -> None:
             st.rerun()
 
 
-# =========================================================
-# Excel / CSV 一括査定
-# =========================================================
-
 def batch_input() -> None:
     st.subheader("Excel一括査定")
     st.caption("複数物件をまとめて査定できます。")
@@ -914,10 +914,6 @@ def batch_input() -> None:
                 with st.expander("履歴保存エラー"):
                     st.code(str(error))
 
-
-# =========================================================
-# 査定結果
-# =========================================================
 
 def show_single_result(first: pd.Series, unit: str) -> None:
     c1, c2, c3, c4 = st.columns(4)
@@ -989,10 +985,6 @@ def show_result(result: pd.DataFrame, unit: str, show_graph: bool) -> None:
                 )
 
 
-# =========================================================
-# 査定履歴
-# =========================================================
-
 def history_page() -> None:
     st.subheader("査定履歴")
 
@@ -1036,10 +1028,6 @@ def history_page() -> None:
         use_container_width=True,
     )
 
-
-# =========================================================
-# UI
-# =========================================================
 
 def workflow() -> None:
     items = [
