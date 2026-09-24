@@ -33,7 +33,8 @@ REQUIRED_COLUMNS = {
     "floor_plan": "間取り", "building_age": "築年数", "asking_price": "売出価格",
 }
 RESULT_COLUMNS = {
-    "査定日時": "査定日時", "案件名": "案件名", "担当者": "担当者",
+    "査定日時": "査定日時", "モデルVersion": "モデルVersion",
+    "案件名": "案件名", "担当者": "担当者",
     "property_id": "物件ID", "city": "市区町村", "district_name": "地区",
     "station_name": "最寄駅", "station_line": "路線", "area_m2": "専有面積㎡",
     "floor_plan": "間取り", "building_age": "築年数", "structure": "構造",
@@ -54,6 +55,7 @@ DB_FIELDS = {
 }
 HISTORY_RENAME = {
     "appraised_at": "査定日時",
+    "model_version": "モデルVersion",
     **{db: RESULT_COLUMNS.get(source, source) for db, source in DB_FIELDS.items()},
 }
 
@@ -119,11 +121,11 @@ def supabase_config() -> dict[str, str]:
     try:
         settings = st.secrets.get("supabase", {})
         return {
-            key: safe_text(settings.get(key))
-            for key in ("url", "publishable_key", "secret_key")
+            "url": safe_text(settings.get("url")),
+            "publishable_key": safe_text(settings.get("publishable_key")),
         }
     except Exception:
-        return {"url": "", "publishable_key": "", "secret_key": ""}
+        return {"url": "", "publishable_key": ""}
 
 
 def auth_configured() -> bool:
@@ -132,8 +134,13 @@ def auth_configured() -> bool:
 
 
 def database_configured() -> bool:
-    cfg = supabase_config()
-    return bool(cfg["url"] and cfg["secret_key"])
+    session = st.session_state.get("auth_session")
+    return bool(
+        auth_configured()
+        and isinstance(session, dict)
+        and session.get("access_token")
+        and session.get("user_id")
+    )
 
 
 def auth_headers() -> dict[str, str]:
@@ -217,6 +224,18 @@ def sign_out() -> None:
     st.session_state.pop("result", None)
 
 
+def current_access_token() -> str:
+    if not current_user():
+        return ""
+    session = st.session_state.get("auth_session", {})
+    return safe_text(session.get("access_token"))
+
+
+def current_model_version() -> str:
+    _, model_info, _, _ = load_model()
+    return safe_text(model_info.get("version"), "Ver.5")
+
+
 def access_gate() -> bool:
     if current_user():
         return True
@@ -227,7 +246,7 @@ def access_gate() -> bool:
         st.error("Supabase Authの設定が不足しています。")
         st.code(
             '[supabase]\nurl = "https://YOUR_PROJECT.supabase.co"\n'
-            'publishable_key = "sb_publishable_..."\nsecret_key = "sb_secret_..."'
+            'publishable_key = "sb_publishable_..."'
         )
         return False
 
@@ -446,6 +465,7 @@ def assess(df: pd.DataFrame) -> pd.DataFrame:
 
     result = enriched.copy()
     result["査定日時"] = now_jst().strftime("%Y/%m/%d %H:%M")
+    result["モデルVersion"] = current_model_version()
     result["推定㎡単価"] = np.round(unit_price).astype(int)
     result["推定成約価格"] = np.round(price).astype(int)
     result["売出㎡単価"] = result["asking_price"] / result["area_m2"]
@@ -460,7 +480,15 @@ def database_url() -> str:
 
 
 def database_headers(minimal: bool = False) -> dict[str, str]:
-    headers = {"apikey": supabase_config()["secret_key"], "Content-Type": "application/json"}
+    token = current_access_token()
+    if not token:
+        raise RuntimeError("ログインセッションを確認できません。再ログインしてください。")
+
+    headers = {
+        "apikey": supabase_config()["publishable_key"],
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
     if minimal:
         headers["Prefer"] = "return=minimal"
     return headers
@@ -469,16 +497,28 @@ def database_headers(minimal: bool = False) -> dict[str, str]:
 def save_history(result: pd.DataFrame) -> bool:
     if not database_configured():
         return False
+
+    user = current_user()
+    if not user or not user.get("id"):
+        raise RuntimeError("ログインユーザーを確認できません。再ログインしてください。")
+
     appraised_at = now_jst().isoformat()
+    model_version = current_model_version()
     payload = [
         {
             "appraised_at": appraised_at,
+            "user_id": user["id"],
+            "model_version": model_version,
             **{db: json_value(row.get(source)) for db, source in DB_FIELDS.items()},
         }
         for _, row in result.iterrows()
     ]
+
     response = requests.post(
-        database_url(), headers=database_headers(True), json=payload, timeout=REQUEST_TIMEOUT
+        database_url(),
+        headers=database_headers(True),
+        json=payload,
+        timeout=REQUEST_TIMEOUT,
     )
     response.raise_for_status()
     load_history.clear()
@@ -489,9 +529,20 @@ def save_history(result: pd.DataFrame) -> bool:
 def load_history() -> pd.DataFrame:
     if not database_configured():
         return pd.DataFrame()
+
+    user = current_user()
+    if not user or not user.get("id"):
+        return pd.DataFrame()
+
     response = requests.get(
-        database_url(), headers=database_headers(),
-        params={"select": "*", "order": "appraised_at.desc", "limit": str(HISTORY_LIMIT)},
+        database_url(),
+        headers=database_headers(),
+        params={
+            "select": "*",
+            "user_id": f"eq.{user['id']}",
+            "order": "appraised_at.desc",
+            "limit": str(HISTORY_LIMIT),
+        },
         timeout=REQUEST_TIMEOUT,
     )
     response.raise_for_status()
@@ -503,7 +554,9 @@ def load_history() -> pd.DataFrame:
     if "査定日時" in df:
         dt = pd.to_datetime(df["査定日時"], errors="coerce", utc=True)
         df["査定日時"] = dt.dt.tz_convert("Asia/Tokyo").dt.strftime("%Y/%m/%d %H:%M")
-    return df.drop(columns=[column for column in ("id", "created_at") if column in df])
+
+    hidden = [column for column in ("id", "created_at", "user_id") if column in df]
+    return df.drop(columns=hidden)
 
 
 def excel_bytes(df: pd.DataFrame, sheet_name: str) -> bytes:
@@ -773,7 +826,7 @@ def history_page() -> None:
         st.info("まだ査定履歴はありません。")
         return
 
-    st.caption(f"クラウドに保存された直近{min(HISTORY_LIMIT, len(history))}件を表示しています。")
+    st.caption(f"ログイン中の担当者に紐づく直近{min(HISTORY_LIMIT, len(history))}件を表示しています。")
     search = st.text_input("履歴を検索", placeholder="案件名・担当者・市区町村・駅名など")
     filtered = history
     if search.strip():
@@ -815,7 +868,7 @@ def sidebar_settings() -> tuple[str, str, bool]:
             st.warning("駅情報：参照CSVなし")
 
         if database_configured():
-            st.success("査定履歴：クラウド設定済み")
+            st.success("査定履歴：ユーザー別保存")
         else:
             st.info("査定履歴：未設定")
 
