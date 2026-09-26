@@ -18,8 +18,11 @@ ROOT = Path(__file__).resolve().parent
 MODEL_FILE = ROOT / "models" / "price_model.cbm"
 REFERENCE_FILE = ROOT / "data" / "reference" / "station_reference.csv"
 SUPABASE_TABLE = "appraisal_history"
+CASES_TABLE = "cases"
 REQUEST_TIMEOUT = 15
 HISTORY_LIMIT = 100
+CASES_LIMIT = 200
+CASE_STATUSES = ["査定中", "提案中", "販売中", "成約", "保留", "失注"]
 
 COLUMN_ALIASES = {
     "物件ID": "property_id", "市区町村": "city", "地区": "district_name",
@@ -233,7 +236,18 @@ def current_access_token() -> str:
 
 def current_model_version() -> str:
     _, model_info, _, _ = load_model()
-    return safe_text(model_info.get("version"), "Ver.5")
+    raw = safe_text(model_info.get("version"), "5")
+
+    if raw.lower().startswith("ver."):
+        return raw
+
+    try:
+        number = float(raw)
+        raw = str(int(number)) if number.is_integer() else str(number)
+    except ValueError:
+        pass
+
+    return f"Ver.{raw}"
 
 
 def access_gate() -> bool:
@@ -253,7 +267,7 @@ def access_gate() -> bool:
     with st.form("login_form"):
         email = st.text_input("メールアドレス", placeholder="example@company.jp")
         password = st.text_input("パスワード", type="password")
-        submitted = st.form_submit_button("ログイン", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("ログイン", type="primary", width="stretch")
 
     if not submitted:
         return False
@@ -291,7 +305,7 @@ def apply_theme(theme: str) -> None:
         .workflow-step {{font-size:12px;color:{muted}}}
         .workflow-title {{font-size:16px;font-weight:700;color:{text}}}
         .app-subtitle {{color:{muted};margin-top:-10px;margin-bottom:20px}}
-        [data-testid="stToolbar"] {{display:none}} #MainMenu,footer {{visibility:hidden}}
+        #MainMenu, footer {{visibility:hidden}}
         </style>
         """,
         unsafe_allow_html=True,
@@ -408,11 +422,8 @@ def normalize_input(df: pd.DataFrame, features: list[str], categories: list[str]
     if missing:
         raise KeyError("必要項目が不足しています: " + ", ".join(missing))
 
-    default_staff = (current_user() or {}).get("email", "")
-    if "担当者" not in df:
-        df["担当者"] = default_staff
-    else:
-        df["担当者"] = df["担当者"].apply(lambda value: safe_text(value, default_staff))
+    authenticated_staff = (current_user() or {}).get("email", "")
+    df["担当者"] = authenticated_staff
 
     generated = generated_property_ids(len(df))
     if "property_id" not in df:
@@ -521,11 +532,9 @@ def save_history(result: pd.DataFrame) -> bool:
         timeout=REQUEST_TIMEOUT,
     )
     response.raise_for_status()
-    load_history.clear()
     return True
 
 
-@st.cache_data(ttl=30, show_spinner=False)
 def load_history() -> pd.DataFrame:
     if not database_configured():
         return pd.DataFrame()
@@ -559,6 +568,369 @@ def load_history() -> pd.DataFrame:
     return df.drop(columns=hidden)
 
 
+
+def cases_url() -> str:
+    return f"{supabase_config()['url'].rstrip('/')}/rest/v1/{CASES_TABLE}"
+
+
+def load_cases() -> pd.DataFrame:
+    if not database_configured():
+        return pd.DataFrame()
+
+    user = current_user()
+    if not user or not user.get("id"):
+        return pd.DataFrame()
+
+    response = requests.get(
+        cases_url(),
+        headers=database_headers(),
+        params={
+            "select": "*",
+            "user_id": f"eq.{user['id']}",
+            "order": "updated_at.desc",
+            "limit": str(CASES_LIMIT),
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    if not data:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(data).rename(
+        columns={
+            "id": "案件ID",
+            "case_name": "案件名",
+            "property_id": "物件ID",
+            "status": "ステータス",
+            "city": "市区町村",
+            "district_name": "地区",
+            "station_name": "最寄駅",
+            "area_m2": "専有面積㎡",
+            "floor_plan": "間取り",
+            "building_age": "築年数",
+            "asking_price": "売出価格",
+            "memo": "メモ",
+            "created_at": "作成日時",
+            "updated_at": "更新日時",
+        }
+    )
+
+    for column in ("作成日時", "更新日時"):
+        if column in df:
+            dt = pd.to_datetime(df[column], errors="coerce", utc=True)
+            df[column] = dt.dt.tz_convert("Asia/Tokyo").dt.strftime("%Y/%m/%d %H:%M")
+
+    if "user_id" in df:
+        df = df.drop(columns=["user_id"])
+
+    return df
+
+
+def create_case(payload: dict) -> None:
+    user = current_user()
+    if not user or not user.get("id"):
+        raise RuntimeError("ログインユーザーを確認できません。")
+
+    data = {
+        "user_id": user["id"],
+        "created_at": now_jst().isoformat(),
+        "updated_at": now_jst().isoformat(),
+        **payload,
+    }
+
+    response = requests.post(
+        cases_url(),
+        headers=database_headers(True),
+        json=data,
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+
+
+def update_case(case_id: str, payload: dict) -> None:
+    response = requests.patch(
+        cases_url(),
+        headers=database_headers(True),
+        params={"id": f"eq.{case_id}"},
+        json={**payload, "updated_at": now_jst().isoformat()},
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+
+
+def delete_case(case_id: str) -> None:
+    response = requests.delete(
+        cases_url(),
+        headers=database_headers(True),
+        params={"id": f"eq.{case_id}"},
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+
+
+def generated_case_property_id() -> str:
+    return f"CASE-{now_jst().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def numeric_or_zero(value, integer: bool = False):
+    try:
+        if value is None or pd.isna(value):
+            return 0 if integer else 0.0
+        return int(float(value)) if integer else float(value)
+    except (TypeError, ValueError):
+        return 0 if integer else 0.0
+
+
+def case_payload(
+    case_name: str,
+    property_id: str,
+    status: str,
+    city: str,
+    district: str,
+    station: str,
+    area_m2: float,
+    floor_plan: str,
+    building_age: int,
+    asking_price: int,
+    memo: str,
+) -> dict:
+    return {
+        "case_name": safe_text(case_name),
+        "property_id": safe_text(property_id) or generated_case_property_id(),
+        "status": status if status in CASE_STATUSES else "査定中",
+        "city": safe_text(city) or None,
+        "district_name": safe_text(district) or None,
+        "station_name": safe_text(station) or None,
+        "area_m2": float(area_m2) if area_m2 > 0 else None,
+        "floor_plan": safe_text(floor_plan) or None,
+        "building_age": int(building_age) if building_age >= 0 else None,
+        "asking_price": int(asking_price) if asking_price > 0 else None,
+        "memo": safe_text(memo) or None,
+    }
+
+
+def attach_latest_appraisal(cases: pd.DataFrame) -> pd.DataFrame:
+    if cases.empty:
+        return cases
+
+    output = cases.copy()
+    output["最新推定成約価格"] = pd.NA
+    output["最終査定日時"] = pd.NA
+
+    try:
+        history = load_history()
+    except requests.RequestException:
+        return output
+
+    if history.empty or "物件ID" not in history:
+        return output
+
+    latest = (
+        history.dropna(subset=["物件ID"])
+        .drop_duplicates("物件ID", keep="first")
+        .set_index("物件ID")
+    )
+
+    for index, row in output.iterrows():
+        property_id = safe_text(row.get("物件ID"))
+        if property_id and property_id in latest.index:
+            appraisal = latest.loc[property_id]
+            output.at[index, "最新推定成約価格"] = appraisal.get("推定成約価格")
+            output.at[index, "最終査定日時"] = appraisal.get("査定日時")
+
+    return output
+
+
+def case_management_page(unit: str) -> None:
+    st.subheader("案件管理")
+    st.caption("案件の作成・検索・ステータス管理を行います。案件データもログインユーザー単位で分離されます。")
+
+    with st.expander("＋ 新規案件を作成", expanded=False):
+        with st.form("create_case_form", clear_on_submit=True):
+            case_name = st.text_input("案件名", placeholder="例：北千住マンション")
+            property_id = st.text_input("物件ID（任意）", placeholder="未入力の場合は自動発行")
+            status = st.selectbox("ステータス", CASE_STATUSES)
+            city = st.text_input("市区町村", placeholder="例：足立区")
+            district = st.text_input("地区", placeholder="例：千住")
+            station = st.text_input("最寄駅", placeholder="例：北千住")
+            area_m2 = st.number_input("専有面積（㎡）", min_value=0.0, value=0.0, step=0.1)
+            floor_plan = st.text_input("間取り", placeholder="例：3LDK")
+            building_age = st.number_input("築年数", min_value=0, value=0, step=1)
+            asking_price = st.number_input(
+                "売出価格（円）", min_value=0, value=0, step=1_000_000, format="%d"
+            )
+            memo = st.text_area("メモ", placeholder="例：売主へ査定結果説明予定")
+            submitted = st.form_submit_button("案件を作成", type="primary", width="stretch")
+
+        if submitted:
+            if not safe_text(case_name):
+                st.error("案件名を入力してください。")
+            else:
+                try:
+                    create_case(
+                        case_payload(
+                            case_name, property_id, status, city, district, station,
+                            area_m2, floor_plan, building_age, asking_price, memo,
+                        )
+                    )
+                    st.toast("案件を作成しました。")
+                    st.rerun()
+                except requests.RequestException as error:
+                    st.error("案件を作成できませんでした。")
+                    with st.expander("エラー詳細"):
+                        st.code(str(error))
+
+    try:
+        cases = load_cases()
+    except requests.RequestException as error:
+        st.error("案件一覧を読み込めませんでした。")
+        with st.expander("エラー詳細"):
+            st.code(str(error))
+        return
+
+    if cases.empty:
+        st.info("まだ案件がありません。上の「新規案件を作成」から登録してください。")
+        return
+
+    cases = attach_latest_appraisal(cases)
+
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("案件数", f"{len(cases):,}件")
+    metric2.metric("査定・提案中", f"{int(cases['ステータス'].isin(['査定中', '提案中']).sum()):,}件")
+    metric3.metric("販売中", f"{int((cases['ステータス'] == '販売中').sum()):,}件")
+    metric4.metric("成約", f"{int((cases['ステータス'] == '成約').sum()):,}件")
+
+    search_col, status_col = st.columns([2, 1])
+    with search_col:
+        search = st.text_input(
+            "案件を検索", placeholder="案件名・物件ID・市区町村・地区・駅名など", key="case_search"
+        )
+    with status_col:
+        status_filter = st.multiselect("ステータス", CASE_STATUSES, key="case_status_filter")
+
+    filtered = cases.copy()
+
+    if search.strip():
+        needle = search.strip().lower()
+        searchable = [
+            column for column in ("案件名", "物件ID", "市区町村", "地区", "最寄駅", "メモ")
+            if column in filtered
+        ]
+        mask = filtered[searchable].astype(str).apply(
+            lambda column: column.str.lower().str.contains(needle, regex=False, na=False)
+        ).any(axis=1)
+        filtered = filtered[mask].copy()
+
+    if status_filter:
+        filtered = filtered[filtered["ステータス"].isin(status_filter)].copy()
+
+    if filtered.empty:
+        st.info("条件に一致する案件はありません。")
+        return
+
+    display = filtered.copy()
+    if "売出価格" in display:
+        display["売出価格"] = display["売出価格"].apply(lambda value: format_money(value, unit))
+    if "最新推定成約価格" in display:
+        display["最新推定成約価格"] = display["最新推定成約価格"].apply(
+            lambda value: format_money(value, unit)
+        )
+
+    list_columns = [
+        column for column in (
+            "案件名", "物件ID", "ステータス", "市区町村", "地区", "最寄駅",
+            "売出価格", "最新推定成約価格", "最終査定日時", "更新日時",
+        ) if column in display
+    ]
+
+    st.dataframe(display[list_columns], hide_index=True, width="stretch")
+
+    option_map = {
+        str(row["案件ID"]): (
+            f"{safe_text(row.get('案件名'), '名称未設定')} | "
+            f"{safe_text(row.get('物件ID'), '-')} | "
+            f"{safe_text(row.get('ステータス'), '-')}"
+        )
+        for _, row in filtered.iterrows()
+    }
+
+    selected_id = st.selectbox(
+        "編集する案件", options=list(option_map), format_func=lambda value: option_map[value]
+    )
+    selected = filtered.loc[filtered["案件ID"].astype(str) == str(selected_id)].iloc[0]
+
+    st.markdown("#### 案件詳細")
+
+    if pd.notna(selected.get("最新推定成約価格")):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("最新推定成約価格", format_money(selected.get("最新推定成約価格"), unit))
+        c2.metric("売出価格", format_money(selected.get("売出価格"), unit))
+        c3.metric("最終査定", safe_text(selected.get("最終査定日時"), "-"))
+
+    status_value = safe_text(selected.get("ステータス"), "査定中")
+    status_index = CASE_STATUSES.index(status_value) if status_value in CASE_STATUSES else 0
+
+    with st.form(f"edit_case_form_{selected_id}"):
+        edit_case_name = st.text_input("案件名", value=safe_text(selected.get("案件名")))
+        edit_property_id = st.text_input("物件ID", value=safe_text(selected.get("物件ID")))
+        edit_status = st.selectbox("ステータス", CASE_STATUSES, index=status_index)
+        edit_city = st.text_input("市区町村", value=safe_text(selected.get("市区町村")))
+        edit_district = st.text_input("地区", value=safe_text(selected.get("地区")))
+        edit_station = st.text_input("最寄駅", value=safe_text(selected.get("最寄駅")))
+        edit_area = st.number_input(
+            "専有面積（㎡）", min_value=0.0, value=numeric_or_zero(selected.get("専有面積㎡")), step=0.1
+        )
+        edit_floor_plan = st.text_input("間取り", value=safe_text(selected.get("間取り")))
+        edit_building_age = st.number_input(
+            "築年数", min_value=0, value=numeric_or_zero(selected.get("築年数"), integer=True), step=1
+        )
+        edit_asking_price = st.number_input(
+            "売出価格（円）", min_value=0, value=numeric_or_zero(selected.get("売出価格"), integer=True),
+            step=1_000_000, format="%d"
+        )
+        edit_memo = st.text_area("メモ", value=safe_text(selected.get("メモ")))
+        update_submitted = st.form_submit_button("変更を保存", type="primary", width="stretch")
+
+    if update_submitted:
+        if not safe_text(edit_case_name):
+            st.error("案件名を入力してください。")
+        else:
+            try:
+                update_case(
+                    str(selected_id),
+                    case_payload(
+                        edit_case_name, edit_property_id, edit_status, edit_city, edit_district,
+                        edit_station, edit_area, edit_floor_plan, edit_building_age,
+                        edit_asking_price, edit_memo,
+                    ),
+                )
+                st.toast("案件を更新しました。")
+                st.rerun()
+            except requests.RequestException as error:
+                st.error("案件を更新できませんでした。")
+                with st.expander("エラー詳細"):
+                    st.code(str(error))
+
+    with st.expander("案件を削除"):
+        st.warning("削除した案件は元に戻せません。査定履歴自体は削除されません。")
+        confirm_delete = st.checkbox(
+            "この案件を削除することを確認しました", key=f"delete_confirm_{selected_id}"
+        )
+        if st.button(
+            "案件を削除", disabled=not confirm_delete,
+            key=f"delete_case_{selected_id}", width="stretch"
+        ):
+            try:
+                delete_case(str(selected_id))
+                st.toast("案件を削除しました。")
+                st.rerun()
+            except requests.RequestException as error:
+                st.error("案件を削除できませんでした。")
+                with st.expander("エラー詳細"):
+                    st.code(str(error))
+
 def excel_bytes(df: pd.DataFrame, sheet_name: str) -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -577,7 +949,7 @@ def excel_bytes(df: pd.DataFrame, sheet_name: str) -> bytes:
 def template_excel() -> bytes:
     return excel_bytes(
         pd.DataFrame([{
-            "案件名": "北千住マンション", "担当者": "山田", "物件ID": "A001",
+            "案件名": "北千住マンション", "物件ID": "A001",
             "市区町村": "足立区", "地区": "千住", "最寄駅": "北千住",
             "専有面積㎡": 65.2, "間取り": "3LDK", "築年数": 12,
             "構造": "RC", "用途地域": "商業地域", "売出価格": 75_000_000,
@@ -705,7 +1077,7 @@ def single_input() -> None:
     with st.form("single_assessment_form", clear_on_submit=False):
         st.markdown("#### 基本情報")
         case_name = st.text_input("案件名", placeholder="例：北千住マンション")
-        staff = st.text_input("担当者", value=email, placeholder="例：山田")
+        st.text_input("担当者", value=email, disabled=True)
         property_id = st.text_input("物件ID（任意）", placeholder="例：A001")
         st.divider()
         st.markdown("#### 所在地")
@@ -728,11 +1100,11 @@ def single_input() -> None:
             "売出価格（円）", min_value=1_000_000, value=75_000_000,
             step=1_000_000, format="%d",
         )
-        submitted = st.form_submit_button("査定する", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("査定する", type="primary", width="stretch")
 
     if submitted:
         data = pd.DataFrame([{
-            "案件名": safe_text(case_name), "担当者": safe_text(staff, email),
+            "案件名": safe_text(case_name), "担当者": email,
             "property_id": safe_text(property_id) or pd.NA, "city": city,
             "district_name": district, "station_name": safe_text(station) or pd.NA,
             "area_m2": area, "floor_plan": floor_plan, "building_age": building_age,
@@ -742,7 +1114,7 @@ def single_input() -> None:
             save_result(assess(data))
 
     if "result" in st.session_state and st.button(
-        "査定結果をクリア", key="clear_single_result", use_container_width=True
+        "査定結果をクリア", key="clear_single_result", width="stretch"
     ):
         st.session_state.pop("result", None)
         st.rerun()
@@ -755,7 +1127,7 @@ def batch_input() -> None:
         "入力テンプレートをダウンロード", data=template_excel(),
         file_name="査定入力テンプレート.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width="stretch",
     )
     file = st.file_uploader("Excel / CSVを選択", type=["xlsx", "csv"])
     if file is None:
@@ -765,8 +1137,8 @@ def batch_input() -> None:
         st.warning("ファイルに査定対象がありません。")
         return
     st.success(f"{len(df):,}件を読み込みました。")
-    st.dataframe(df, hide_index=True, use_container_width=True)
-    if st.button("一括査定する", type="primary", use_container_width=True):
+    st.dataframe(df, hide_index=True, width="stretch")
+    if st.button("一括査定する", type="primary", width="stretch"):
         with st.spinner("査定しています..."):
             save_result(assess(df))
 
@@ -795,14 +1167,14 @@ def show_result(result: pd.DataFrame, unit: str, show_graph: bool) -> None:
 
     st.subheader("査定結果一覧")
     output = sales_view(result)
-    st.dataframe(output, hide_index=True, use_container_width=True)
+    st.dataframe(output, hide_index=True, width="stretch")
     left, right = st.columns(2)
     with left:
         st.download_button(
             "査定結果をExcelで出力", data=excel_bytes(output, "査定結果"),
             file_name="査定結果.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary", use_container_width=True,
+            type="primary", width="stretch",
         )
     with right:
         if len(result) == 1:
@@ -835,12 +1207,12 @@ def history_page() -> None:
             lambda column: column.str.lower().str.contains(needle, regex=False, na=False)
         ).any(axis=1)
         filtered = history[mask].copy()
-    st.dataframe(filtered, hide_index=True, use_container_width=True)
+    st.dataframe(filtered, hide_index=True, width="stretch")
     st.download_button(
         "表示中の履歴をExcelで出力", data=excel_bytes(filtered, "査定履歴"),
         file_name="査定履歴.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -876,8 +1248,13 @@ def sidebar_settings() -> tuple[str, str, bool]:
             st.success("ユーザー認証：有効")
         else:
             st.error("ユーザー認証：未設定")
+
+        if database_configured():
+            st.success("案件管理：利用可能")
+        else:
+            st.info("案件管理：未設定")
         st.divider()
-        if st.button("ログアウト", use_container_width=True):
+        if st.button("ログアウト", width="stretch"):
             sign_out()
             st.rerun()
     return theme, unit, show_graph
@@ -889,7 +1266,15 @@ def main() -> None:
 
     theme, unit, show_graph = sidebar_settings()
     apply_theme(theme)
-    st.title("不動産価格査定システム")
+
+    title_col, logout_col = st.columns([8, 1])
+    with title_col:
+        st.title("不動産価格査定システム")
+    with logout_col:
+        st.write("")
+        if st.button("ログアウト", key="top_logout", width="stretch"):
+            sign_out()
+            st.rerun()
     st.markdown(
         '<div class="app-subtitle">東京都中古マンション 査定・売出価格検討支援</div>',
         unsafe_allow_html=True,
@@ -906,7 +1291,9 @@ def main() -> None:
             )
     st.write("")
 
-    single_tab, batch_tab, history_tab = st.tabs(["1件査定", "Excel一括査定", "査定履歴"])
+    single_tab, batch_tab, history_tab, cases_tab = st.tabs(
+        ["1件査定", "Excel一括査定", "査定履歴", "案件管理"]
+    )
     try:
         with single_tab:
             single_input()
@@ -914,6 +1301,8 @@ def main() -> None:
             batch_input()
         with history_tab:
             history_page()
+        with cases_tab:
+            case_management_page(unit)
         result = st.session_state.get("result")
         if isinstance(result, pd.DataFrame) and not result.empty:
             show_result(result, unit, show_graph)
