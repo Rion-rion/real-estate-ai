@@ -7,3 +7,4 @@ data/raw/
 data/processed/
 models/*.cbm
 output/price_test_predictions.csv
+.streamlit/secrets.toml
