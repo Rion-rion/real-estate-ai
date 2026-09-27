@@ -519,6 +519,7 @@ def save_history(result: pd.DataFrame) -> bool:
         {
             "appraised_at": appraised_at,
             "user_id": user["id"],
+            "case_id": json_value(row.get("case_id")),
             "model_version": model_version,
             **{db: json_value(row.get(source)) for db, source in DB_FIELDS.items()},
         }
@@ -567,6 +568,46 @@ def load_history() -> pd.DataFrame:
     hidden = [column for column in ("id", "created_at", "user_id") if column in df]
     return df.drop(columns=hidden)
 
+
+
+def load_case_appraisals(case_id: str) -> pd.DataFrame:
+    if not database_configured() or not safe_text(case_id):
+        return pd.DataFrame()
+
+    user = current_user()
+    if not user or not user.get("id"):
+        return pd.DataFrame()
+
+    response = requests.get(
+        database_url(),
+        headers=database_headers(),
+        params={
+            "select": "*",
+            "user_id": f"eq.{user['id']}",
+            "case_id": f"eq.{case_id}",
+            "order": "appraised_at.desc",
+            "limit": str(HISTORY_LIMIT),
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    if not data:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(data).rename(columns=HISTORY_RENAME)
+
+    if "査定日時" in df:
+        dt = pd.to_datetime(df["査定日時"], errors="coerce", utc=True)
+        df["査定日時"] = dt.dt.tz_convert("Asia/Tokyo").dt.strftime("%Y/%m/%d %H:%M")
+
+    hidden = [
+        column
+        for column in ("id", "created_at", "user_id", "case_id")
+        if column in df
+    ]
+    return df.drop(columns=hidden)
 
 
 def cases_url() -> str:
@@ -724,19 +765,19 @@ def attach_latest_appraisal(cases: pd.DataFrame) -> pd.DataFrame:
     except requests.RequestException:
         return output
 
-    if history.empty or "物件ID" not in history:
+    if history.empty or "case_id" not in history:
         return output
 
     latest = (
-        history.dropna(subset=["物件ID"])
-        .drop_duplicates("物件ID", keep="first")
-        .set_index("物件ID")
+        history.dropna(subset=["case_id"])
+        .drop_duplicates("case_id", keep="first")
+        .set_index("case_id")
     )
 
     for index, row in output.iterrows():
-        property_id = safe_text(row.get("物件ID"))
-        if property_id and property_id in latest.index:
-            appraisal = latest.loc[property_id]
+        case_id = safe_text(row.get("案件ID"))
+        if case_id and case_id in latest.index:
+            appraisal = latest.loc[case_id]
             output.at[index, "最新推定成約価格"] = appraisal.get("推定成約価格")
             output.at[index, "最終査定日時"] = appraisal.get("査定日時")
 
@@ -863,11 +904,60 @@ def case_management_page(unit: str) -> None:
 
     st.markdown("#### 案件詳細")
 
+    if st.button(
+        "この案件を1件査定にセット",
+        key=f"assess_case_{selected_id}",
+        type="primary",
+        width="stretch",
+    ):
+        st.session_state["assessment_case_id"] = str(selected_id)
+        st.toast("案件を査定画面にセットしました。")
+        st.rerun()
+
     if pd.notna(selected.get("最新推定成約価格")):
         c1, c2, c3 = st.columns(3)
         c1.metric("最新推定成約価格", format_money(selected.get("最新推定成約価格"), unit))
         c2.metric("売出価格", format_money(selected.get("売出価格"), unit))
         c3.metric("最終査定", safe_text(selected.get("最終査定日時"), "-"))
+
+    try:
+        case_history = load_case_appraisals(str(selected_id))
+    except requests.RequestException as error:
+        case_history = pd.DataFrame()
+        st.warning("この案件の査定履歴を読み込めませんでした。")
+        with st.expander("査定履歴エラー"):
+            st.code(str(error))
+
+    st.markdown("#### この案件の査定履歴")
+    if case_history.empty:
+        st.info("この案件にはまだ査定履歴がありません。")
+    else:
+        case_history_display = case_history[
+            [
+                column
+                for column in (
+                    "査定日時",
+                    "モデルVersion",
+                    "推定成約価格",
+                    "売出価格",
+                    "価格乖離率(%)",
+                    "価格評価",
+                )
+                if column in case_history
+            ]
+        ].copy()
+
+        for column in ("推定成約価格", "売出価格"):
+            if column in case_history_display:
+                case_history_display[column] = case_history_display[column].apply(
+                    lambda value: format_money(value, unit)
+                )
+
+        st.dataframe(
+            case_history_display,
+            hide_index=True,
+            width="stretch",
+        )
 
     status_value = safe_text(selected.get("ステータス"), "査定中")
     status_index = CASE_STATUSES.index(status_value) if status_value in CASE_STATUSES else 0
@@ -1072,49 +1162,213 @@ def save_result(result: pd.DataFrame) -> None:
 def single_input() -> None:
     email = (current_user() or {}).get("email", "")
     st.subheader("物件情報")
-    st.caption("上から順番に物件情報を入力してください。")
+    st.caption("案件管理の案件に紐づけて査定できます。紐づけない単発査定も可能です。")
 
-    with st.form("single_assessment_form", clear_on_submit=False):
+    try:
+        cases = load_cases()
+    except requests.RequestException:
+        cases = pd.DataFrame()
+
+    case_options = [""]
+    case_label_map = {"": "紐づけなし（単発査定）"}
+
+    if not cases.empty:
+        for _, row in cases.iterrows():
+            case_id = str(row["案件ID"])
+            case_options.append(case_id)
+            case_label_map[case_id] = (
+                f"{safe_text(row.get('案件名'), '名称未設定')} | "
+                f"{safe_text(row.get('物件ID'), '-')}"
+            )
+
+    requested_case_id = safe_text(st.session_state.pop("assessment_case_id", ""))
+    default_index = (
+        case_options.index(requested_case_id)
+        if requested_case_id in case_options
+        else 0
+    )
+
+    selected_case_id = st.selectbox(
+        "案件に紐づける",
+        options=case_options,
+        index=default_index,
+        format_func=lambda value: case_label_map[value],
+        key="single_case_selector",
+    )
+
+    selected_case = None
+    if selected_case_id and not cases.empty:
+        matches = cases.loc[cases["案件ID"].astype(str) == selected_case_id]
+        if not matches.empty:
+            selected_case = matches.iloc[0]
+
+    suffix = selected_case_id or "standalone"
+
+    case_name_default = safe_text(selected_case.get("案件名")) if selected_case is not None else ""
+    property_id_default = safe_text(selected_case.get("物件ID")) if selected_case is not None else ""
+    city_default = safe_text(selected_case.get("市区町村"), "足立区") if selected_case is not None else "足立区"
+    district_default = safe_text(selected_case.get("地区"), "千住") if selected_case is not None else "千住"
+    station_default = safe_text(selected_case.get("最寄駅"), "北千住") if selected_case is not None else "北千住"
+    area_default = max(
+        1.0,
+        numeric_or_zero(selected_case.get("専有面積㎡"))
+        if selected_case is not None
+        else 65.2,
+    )
+    floor_default = safe_text(selected_case.get("間取り"), "3LDK") if selected_case is not None else "3LDK"
+    age_default = (
+        numeric_or_zero(selected_case.get("築年数"), integer=True)
+        if selected_case is not None
+        else 12
+    )
+    price_default = (
+        numeric_or_zero(selected_case.get("売出価格"), integer=True)
+        if selected_case is not None
+        else 75_000_000
+    )
+    price_default = max(1_000_000, price_default)
+
+    if selected_case is not None:
+        st.info(f"「{case_name_default}」へ査定結果を正式に紐づけます。")
+
+    with st.form(f"single_assessment_form_{suffix}", clear_on_submit=False):
         st.markdown("#### 基本情報")
-        case_name = st.text_input("案件名", placeholder="例：北千住マンション")
-        st.text_input("担当者", value=email, disabled=True)
-        property_id = st.text_input("物件ID（任意）", placeholder="例：A001")
+        case_name = st.text_input(
+            "案件名",
+            value=case_name_default,
+            placeholder="例：北千住マンション",
+            key=f"single_case_name_{suffix}",
+        )
+        st.text_input(
+            "担当者",
+            value=email,
+            disabled=True,
+            key=f"single_staff_{suffix}",
+        )
+        property_id = st.text_input(
+            "物件ID（任意）",
+            value=property_id_default,
+            placeholder="例：A001",
+            key=f"single_property_id_{suffix}",
+        )
+
         st.divider()
         st.markdown("#### 所在地")
-        city = st.text_input("市区町村", value="足立区")
-        district = st.text_input("地区", value="千住")
-        station = st.text_input(
-            "最寄駅", value="北千住",
-            help="「駅」は付けても付けなくても大丈夫です。空欄の場合は地区から代表駅を補完します。",
+        city = st.text_input(
+            "市区町村",
+            value=city_default,
+            key=f"single_city_{suffix}",
         )
+        district = st.text_input(
+            "地区",
+            value=district_default,
+            key=f"single_district_{suffix}",
+        )
+        station = st.text_input(
+            "最寄駅",
+            value=station_default,
+            help="「駅」は付けても付けなくても大丈夫です。空欄の場合は地区から代表駅を補完します。",
+            key=f"single_station_{suffix}",
+        )
+
         st.divider()
         st.markdown("#### 物件情報")
-        area = st.number_input("専有面積（㎡）", min_value=1.0, value=65.2, step=0.1, format="%.1f")
-        floor_plan = st.text_input("間取り", value="3LDK")
-        building_age = st.number_input("築年数", min_value=0, value=12, step=1)
-        structure = st.selectbox("構造", ["RC", "SRC", "S", "その他", "不明"])
-        city_planning = st.text_input("用途地域", value="商業地域")
+        area = st.number_input(
+            "専有面積（㎡）",
+            min_value=1.0,
+            value=float(area_default),
+            step=0.1,
+            format="%.1f",
+            key=f"single_area_{suffix}",
+        )
+        floor_plan = st.text_input(
+            "間取り",
+            value=floor_default,
+            key=f"single_floor_{suffix}",
+        )
+        building_age = st.number_input(
+            "築年数",
+            min_value=0,
+            value=int(age_default),
+            step=1,
+            key=f"single_age_{suffix}",
+        )
+        structure = st.selectbox(
+            "構造",
+            ["RC", "SRC", "S", "その他", "不明"],
+            key=f"single_structure_{suffix}",
+        )
+        city_planning = st.text_input(
+            "用途地域",
+            value="商業地域",
+            key=f"single_planning_{suffix}",
+        )
+
         st.divider()
         st.markdown("#### 価格")
         asking_price = st.number_input(
-            "売出価格（円）", min_value=1_000_000, value=75_000_000,
-            step=1_000_000, format="%d",
+            "売出価格（円）",
+            min_value=1_000_000,
+            value=int(price_default),
+            step=1_000_000,
+            format="%d",
+            key=f"single_price_{suffix}",
         )
-        submitted = st.form_submit_button("査定する", type="primary", width="stretch")
+
+        submitted = st.form_submit_button(
+            "査定する",
+            type="primary",
+            width="stretch",
+        )
 
     if submitted:
-        data = pd.DataFrame([{
-            "案件名": safe_text(case_name), "担当者": email,
-            "property_id": safe_text(property_id) or pd.NA, "city": city,
-            "district_name": district, "station_name": safe_text(station) or pd.NA,
-            "area_m2": area, "floor_plan": floor_plan, "building_age": building_age,
-            "structure": structure, "city_planning": city_planning, "asking_price": asking_price,
-        }])
+        data = pd.DataFrame(
+            [
+                {
+                    "case_id": selected_case_id or pd.NA,
+                    "案件名": safe_text(case_name),
+                    "担当者": email,
+                    "property_id": safe_text(property_id) or pd.NA,
+                    "city": city,
+                    "district_name": district,
+                    "station_name": safe_text(station) or pd.NA,
+                    "area_m2": area,
+                    "floor_plan": floor_plan,
+                    "building_age": building_age,
+                    "structure": structure,
+                    "city_planning": city_planning,
+                    "asking_price": asking_price,
+                }
+            ]
+        )
+
         with st.spinner("査定しています..."):
-            save_result(assess(data))
+            result = assess(data)
+            save_result(result)
+
+            if selected_case_id:
+                try:
+                    update_case(
+                        selected_case_id,
+                        {
+                            "case_name": safe_text(case_name),
+                            "property_id": safe_text(property_id) or property_id_default,
+                            "city": safe_text(city) or None,
+                            "district_name": safe_text(district) or None,
+                            "station_name": safe_text(station) or None,
+                            "area_m2": float(area),
+                            "floor_plan": safe_text(floor_plan) or None,
+                            "building_age": int(building_age),
+                            "asking_price": int(asking_price),
+                        },
+                    )
+                except requests.RequestException:
+                    st.warning("査定は保存されましたが、案件の更新日時を更新できませんでした。")
 
     if "result" in st.session_state and st.button(
-        "査定結果をクリア", key="clear_single_result", width="stretch"
+        "査定結果をクリア",
+        key="clear_single_result",
+        width="stretch",
     ):
         st.session_state.pop("result", None)
         st.rerun()
@@ -1200,13 +1454,18 @@ def history_page() -> None:
 
     st.caption(f"ログイン中の担当者に紐づく直近{min(HISTORY_LIMIT, len(history))}件を表示しています。")
     search = st.text_input("履歴を検索", placeholder="案件名・担当者・市区町村・駅名など")
-    filtered = history
+    display_history = history.drop(
+        columns=["case_id"],
+        errors="ignore",
+    )
+
+    filtered = display_history
     if search.strip():
         needle = search.strip().lower()
-        mask = history.astype(str).apply(
+        mask = display_history.astype(str).apply(
             lambda column: column.str.lower().str.contains(needle, regex=False, na=False)
         ).any(axis=1)
-        filtered = history[mask].copy()
+        filtered = display_history[mask].copy()
     st.dataframe(filtered, hide_index=True, width="stretch")
     st.download_button(
         "表示中の履歴をExcelで出力", data=excel_bytes(filtered, "査定履歴"),
